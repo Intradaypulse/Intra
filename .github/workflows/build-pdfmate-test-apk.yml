@@ -1,0 +1,92 @@
+name: Build PDFMate Test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - ".github/workflows/build-pdfmate-test-apk.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create Android project
+        run: |
+          flutter --version
+          flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
+          cp src/pubspec.yaml buildapp/pubspec.yaml
+          cp src/main.dart buildapp/lib/main.dart
+
+      - name: Configure Android manifest
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("buildapp/android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          if 'android.permission.CAMERA' not in s:
+              s = s.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                  '    <uses-permission android:name="android.permission.CAMERA"/>'
+              )
+          marker = '<application'
+          pos = s.find(marker)
+          app_open = s.find('>', pos)
+          meta = (
+              '\n        <meta-data\n'
+              '            android:name="com.google.android.gms.ads.APPLICATION_ID"\n'
+              '            android:value="ca-app-pub-3940256099942544~3347511713"/>'
+          )
+          if 'com.google.android.gms.ads.APPLICATION_ID' not in s:
+              s = s[:app_open+1] + meta + s[app_open+1:]
+          p.write_text(s)
+          PY
+          cat buildapp/android/app/src/main/AndroidManifest.xml
+
+      - name: Resolve packages
+        working-directory: buildapp
+        run: flutter pub get
+
+      - name: Build debug APK
+        working-directory: buildapp
+        run: flutter build apk --debug
+
+      - name: Verify APK
+        run: |
+          test -f buildapp/build/app/outputs/flutter-apk/app-debug.apk
+          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Test.apk
+          sha256sum PDFMate-Test.apk | tee PDFMate-Test.apk.sha256
+          ls -lh PDFMate-Test.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Test-APK
+          path: |
+            PDFMate-Test.apk
+            PDFMate-Test.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
