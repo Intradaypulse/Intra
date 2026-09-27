@@ -429,3 +429,5 @@ class _ToolCard extends StatelessWidget {
     );
   }
 }
+
+// Build trigger: PDFMate Android test APK
