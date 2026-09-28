@@ -1,25 +1,31 @@
 name: pdfmate
-description: PDFMate testing build
+description: PDFMate beta build
 publish_to: none
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
-  sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.10.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
   image_picker: ^1.2.3
-  pdf: ^3.11.3
-  path_provider: ^2.1.5
-  share_plus: ^10.1.4
+  pdf: ^3.13.1
+  path_provider: ^2.1.6
+  share_plus: ^13.3.0
   google_mobile_ads: ^9.1.0
+  shared_preferences: ^2.5.3
+  file_picker: ^13.1.0
+  pdf_manipulator: ^5.0.0
+  pdfx: ^2.9.2
+  document_scan: ^0.3.1
+  google_mlkit_text_recognition: ^0.17.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
