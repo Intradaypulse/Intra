@@ -1,4 +1,4 @@
-name: Build PDFMate Test APK
+name: Build PDFMate Beta APK
 
 on:
   workflow_dispatch:
@@ -8,7 +8,6 @@ on:
     branches: [main]
     paths:
       - "src/**"
-      - "fullsrc/**"
       - ".github/workflows/build-pdfmate-test-apk.yml"
 
 permissions:
@@ -17,14 +16,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -35,15 +34,13 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Restore full PDFMate source
+      - name: Create Android project
         run: |
           flutter --version
-          mkdir -p buildapp
-          cat fullsrc/part*.b64 | base64 --decode > /tmp/pdfmate-core.tar.gz
-          tar -xzf /tmp/pdfmate-core.tar.gz -C buildapp
-          cd buildapp
-          flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate .
-          rm -f test/widget_test.dart
+          flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
+          cp src/pubspec.yaml buildapp/pubspec.yaml
+          cp src/*.dart buildapp/lib/
+          rm -f buildapp/test/widget_test.dart
 
       - name: Configure Android manifest
         shell: bash
@@ -70,7 +67,6 @@ jobs:
               s = s[:app_open+1] + meta + s[app_open+1:]
           p.write_text(s)
           PY
-          cat buildapp/android/app/src/main/AndroidManifest.xml
 
       - name: Resolve packages
         working-directory: buildapp
@@ -80,23 +76,23 @@ jobs:
         working-directory: buildapp
         run: flutter analyze --no-fatal-infos
 
-      - name: Build debug APK
+      - name: Build ARM64 debug APK
         working-directory: buildapp
         run: flutter build apk --debug --target-platform android-arm64
 
       - name: Verify APK
         run: |
           test -f buildapp/build/app/outputs/flutter-apk/app-debug.apk
-          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Full-Beta-arm64.apk
-          sha256sum PDFMate-Full-Beta-arm64.apk | tee PDFMate-Full-Beta-arm64.apk.sha256
-          ls -lh PDFMate-Full-Beta-arm64.apk
+          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Beta-arm64.apk
+          sha256sum PDFMate-Beta-arm64.apk | tee PDFMate-Beta-arm64.apk.sha256
+          ls -lh PDFMate-Beta-arm64.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Full-Beta-APK
+          name: PDFMate-Beta-APK
           path: |
-            PDFMate-Full-Beta-arm64.apk
-            PDFMate-Full-Beta-arm64.apk.sha256
+            PDFMate-Beta-arm64.apk
+            PDFMate-Beta-arm64.apk.sha256
           if-no-files-found: error
           retention-days: 14
