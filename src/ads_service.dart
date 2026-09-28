@@ -29,18 +29,32 @@ class AdsService {
   static const _productionAppOpenId =
       String.fromEnvironment('ADMOB_APP_OPEN_ID');
 
-  static const bannerId = _productionBannerId == ''
-      ? _bannerTestId
-      : _productionBannerId;
-  static const interstitialId = _productionInterstitialId == ''
-      ? _interstitialTestId
-      : _productionInterstitialId;
-  static const rewardedId = _productionRewardedId == ''
-      ? _rewardedTestId
-      : _productionRewardedId;
-  static const appOpenId = _productionAppOpenId == ''
-      ? _appOpenTestId
-      : _productionAppOpenId;
+  static bool get _productionIdsPresent =>
+      _productionBannerId.isNotEmpty &&
+      _productionInterstitialId.isNotEmpty &&
+      _productionRewardedId.isNotEmpty &&
+      _productionAppOpenId.isNotEmpty &&
+      _productionBannerId != _bannerTestId &&
+      _productionInterstitialId != _interstitialTestId &&
+      _productionRewardedId != _rewardedTestId &&
+      _productionAppOpenId != _appOpenTestId;
+
+  static String get bannerId =>
+      kReleaseMode && _productionIdsPresent
+          ? _productionBannerId
+          : _bannerTestId;
+  static String get interstitialId =>
+      kReleaseMode && _productionIdsPresent
+          ? _productionInterstitialId
+          : _interstitialTestId;
+  static String get rewardedId =>
+      kReleaseMode && _productionIdsPresent
+          ? _productionRewardedId
+          : _rewardedTestId;
+  static String get appOpenId =>
+      kReleaseMode && _productionIdsPresent
+          ? _productionAppOpenId
+          : _appOpenTestId;
 
   static const int _defaultInterstitialEvery =
       int.fromEnvironment('INTERSTITIAL_EVERY', defaultValue: 3);
@@ -85,21 +99,12 @@ class AdsService {
   }
 
 
-  bool get productionConfigured =>
-      _productionBannerId.isNotEmpty &&
-      _productionInterstitialId.isNotEmpty &&
-      _productionRewardedId.isNotEmpty &&
-      _productionAppOpenId.isNotEmpty &&
-      !usingTestIds;
+  bool get productionConfigured => _productionIdsPresent;
 
   bool get productionRevenueMode =>
-      kReleaseMode && productionConfigured;
+      kReleaseMode && _productionIdsPresent;
 
-  bool get usingTestIds =>
-      bannerId == _bannerTestId ||
-      interstitialId == _interstitialTestId ||
-      rewardedId == _rewardedTestId ||
-      appOpenId == _appOpenTestId;
+  bool get usingTestIds => !productionRevenueMode;
 
   Future<void> initialize() async {
     if (_initialized) return;

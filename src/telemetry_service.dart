@@ -16,6 +16,8 @@ class TelemetryService {
       String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
   static const _storageBucket =
       String.fromEnvironment('FIREBASE_STORAGE_BUCKET');
+  static const _debugCollectionEnabled =
+      bool.fromEnvironment('FIREBASE_DEBUG_ENABLED', defaultValue: false);
 
   bool _enabled = false;
   FirebaseAnalytics? _analytics;
@@ -51,6 +53,13 @@ class TelemetryService {
     if (!configurationPresent) {
       debugPrint(
         'Firebase disabled: FIREBASE_* dart-defines are not configured.',
+      );
+      return false;
+    }
+
+    if (!kReleaseMode && !_debugCollectionEnabled) {
+      debugPrint(
+        'Firebase collection disabled outside release builds.',
       );
       return false;
     }
