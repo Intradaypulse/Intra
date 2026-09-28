@@ -1469,9 +1469,21 @@ class PdfService {
       return output;
     } catch (_) {
       await sink.close();
+      try {
+        if (await output.exists()) await output.delete();
+      } catch (_) {}
       rethrow;
     } finally {
       await pdf.dispose();
+      for (final path in paths) {
+        try {
+          final file = File(path);
+          final name = file.uri.pathSegments.last;
+          if (name.startsWith('pdfmate_scan_') && await file.exists()) {
+            await file.delete();
+          }
+        } catch (_) {}
+      }
     }
   }
 
