@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:document_scan/document_scan.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'manual_crop_screen.dart';
 
@@ -30,7 +31,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
 
   DocumentCorners? _corners;
   AutoCaptureStatus _captureStatus = AutoCaptureStatus.searching;
-  final List<Uint8List> _pages = [];
+  final List<File> _pages = [];
 
   bool _starting = false;
   bool _capturing = false;
@@ -249,8 +250,14 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       );
 
       if (result != null && mounted) {
+        final dir = await getTemporaryDirectory();
+        final file = File(
+          '${dir.path}/pdfmate_scan_${DateTime.now().microsecondsSinceEpoch}.jpg',
+        );
+        await file.writeAsBytes(result.bytes, flush: true);
+        if (!mounted) return;
         setState(() {
-          _pages.add(result.bytes);
+          _pages.add(file);
           _hint = 'Page ${_pages.length} added';
         });
       }
@@ -291,9 +298,11 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
 
   void _finish() {
     if (_pages.isEmpty) {
-      Navigator.of(context).pop<List<Uint8List>>();
+      Navigator.of(context).pop<List<String>>();
     } else {
-      Navigator.of(context).pop<List<Uint8List>>(List.of(_pages));
+      Navigator.of(context).pop<List<String>>(
+        [for (final page in _pages) page.path],
+      );
     }
   }
 
@@ -440,7 +449,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                       },
                       itemBuilder: (context, index) {
                         return Container(
-                          key: ValueKey(_pages[index]),
+                          key: ValueKey(_pages[index].path),
                           width: 82,
                           margin: const EdgeInsets.only(right: 8),
                           child: Stack(
@@ -448,7 +457,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: Image.memory(
+                                child: Image.file(
                                   _pages[index],
                                   fit: BoxFit.cover,
                                 ),
@@ -461,8 +470,11 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                                   shape: const CircleBorder(),
                                   child: InkWell(
                                     customBorder: const CircleBorder(),
-                                    onTap: () =>
-                                        setState(() => _pages.removeAt(index)),
+                                    onTap: () {
+                                      final page = _pages[index];
+                                      setState(() => _pages.removeAt(index));
+                                      page.delete().catchError((_) => page);
+                                    },
                                     child: const Padding(
                                       padding: EdgeInsets.all(4),
                                       child: Icon(
