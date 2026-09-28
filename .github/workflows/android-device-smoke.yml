@@ -24,6 +24,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - api: 23
+            profile: pixel_2
           - api: 29
             profile: pixel_2
           - api: 35
