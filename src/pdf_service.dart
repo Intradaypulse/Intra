@@ -1435,7 +1435,6 @@ class PdfService {
           renderedBytes = rendered.data;
           break;
         }
-
         final pageBytes = renderedBytes;
         if (pageBytes == null) continue;
 
@@ -1460,44 +1459,45 @@ class PdfService {
         }
 
         final info = doc.pages[index];
-
         for (final block in recognized.blocks) {
           for (final line in block.lines) {
-            final parts = line.elements.isEmpty
-                ? [(line.text, line.boundingBox)]
-                : [
-                    for (final element in line.elements)
-                      (element.text, element.boundingBox),
-                  ];
+            final elements = line.elements.isEmpty ? [null] : line.elements;
 
-            for (final part in parts) {
-              final text = part.$1.trim();
+            for (final element in elements) {
+              final text = (element?.text ?? line.text).trim();
               if (text.isEmpty) continue;
 
+              final bounds = element?.boundingBox ?? line.boundingBox;
+              final angleDegrees = element?.angle ?? line.angle ?? 0;
+
               final placement = mapOcrRectToPdf(
-                leftPx: part.$2.left,
-                topPx: part.$2.top,
-                widthPx: part.$2.width,
-                heightPx: part.$2.height,
+                leftPx: bounds.left,
+                topPx: bounds.top,
+                widthPx: bounds.width,
+                heightPx: bounds.height,
                 imageWidthPx: decoded.width.toDouble(),
                 imageHeightPx: decoded.height.toDouble(),
                 pdfWidthPt: info.width,
                 pdfHeightPt: info.height,
               );
-
               if (placement.width <= 0 || placement.height <= 0) continue;
+
+              final pdfY = math.max(
+                0,
+                info.height - placement.top - placement.height,
+              );
 
               await editor.addWatermark(
                 index,
                 text,
                 style: PdfWatermarkStyle(
+                  opacity: 0,
                   fontSize: math.max(2, placement.height * 0.82),
-                  opacity: 0.001,
-                  rotation: line.angle ?? 0,
+                  rotation: angleDegrees,
                 ),
                 position: PdfWatermarkPosition.exact(
                   x: placement.left,
-                  y: placement.top,
+                  y: pdfY,
                   width: placement.width,
                   height: placement.height,
                 ),
