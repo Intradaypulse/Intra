@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -161,6 +162,8 @@ class _LaunchScreen extends StatelessWidget {
   }
 }
 
+enum PdfSortMode { newest, name, size }
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -185,6 +188,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _search = TextEditingController();
 
   List<PdfRecord> _files = [];
+  final Map<String, int> _fileSizes = {};
+  final Map<String, Future<Uint8List?>> _thumbnailFutures = {};
+  PdfSortMode _sortMode = PdfSortMode.newest;
+  bool _favoritesOnly = false;
   bool _busy = false;
   BannerAd? _banner;
 
@@ -216,7 +223,57 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadFiles() async {
     final files = await _store.load();
-    if (mounted) setState(() => _files = files);
+    final sizes = <String, int>{};
+    await Future.wait([
+      for (final record in files)
+        () async {
+          try {
+            sizes[record.path] = await File(record.path).length();
+          } catch (_) {
+            sizes[record.path] = 0;
+          }
+        }(),
+    ]);
+
+    _thumbnailFutures.removeWhere(
+      (path, _) => !files.any((record) => record.path == path),
+    );
+
+    if (mounted) {
+      setState(() {
+        _files = files;
+        _fileSizes
+          ..clear()
+          ..addAll(sizes);
+      });
+    }
+  }
+
+  Future<Uint8List?> _loadThumbnail(String path) async {
+    try {
+      return await _service.renderFirstThumbnail(
+        File(path),
+        width: 150,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List?> _thumbnail(String path) =>
+      _thumbnailFutures.putIfAbsent(path, () => _loadThumbnail(path));
+
+  String _formatFileSize(int bytes) {
+    const kb = 1024;
+    const mb = kb * 1024;
+    if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
+    if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(0)} KB';
+    return '$bytes B';
+  }
+
+  Future<void> _toggleFavorite(PdfRecord record) async {
+    await _store.setFavorite(record.path, !record.favorite);
+    await _loadFiles();
   }
 
   Future<void> _register(File file) async {
@@ -579,8 +636,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<PdfRecord> get _filtered {
     final query = _search.text.trim().toLowerCase();
-    if (query.isEmpty) return _files;
-    return _files.where((e) => e.name.toLowerCase().contains(query)).toList();
+    final result = _files.where((record) {
+      if (_favoritesOnly && !record.favorite) return false;
+      if (query.isNotEmpty &&
+          !record.name.toLowerCase().contains(query)) {
+        return false;
+      }
+      return true;
+    }).toList();
+
+    switch (_sortMode) {
+      case PdfSortMode.newest:
+        result.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      case PdfSortMode.name:
+        result.sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+      case PdfSortMode.size:
+        result.sort(
+          (a, b) =>
+              (_fileSizes[b.path] ?? 0).compareTo(_fileSizes[a.path] ?? 0),
+        );
+    }
+    return result;
   }
 
   @override
