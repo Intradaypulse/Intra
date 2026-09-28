@@ -8,6 +8,7 @@ import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/pdf_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory root;
   late Directory docs;
   late Directory temp;
