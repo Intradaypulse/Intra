@@ -868,6 +868,40 @@ class _HomeScreenState extends State<HomeScreen> {
                             ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       const Spacer(),
+                      IconButton(
+                        tooltip: _favoritesOnly
+                            ? 'Show all PDFs'
+                            : 'Show favorites',
+                        onPressed: () => setState(
+                          () => _favoritesOnly = !_favoritesOnly,
+                        ),
+                        icon: Icon(
+                          _favoritesOnly
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded,
+                        ),
+                      ),
+                      PopupMenuButton<PdfSortMode>(
+                        tooltip: 'Sort PDFs',
+                        initialValue: _sortMode,
+                        onSelected: (value) =>
+                            setState(() => _sortMode = value),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: PdfSortMode.newest,
+                            child: Text('Newest first'),
+                          ),
+                          PopupMenuItem(
+                            value: PdfSortMode.name,
+                            child: Text('Name A–Z'),
+                          ),
+                          PopupMenuItem(
+                            value: PdfSortMode.size,
+                            child: Text('Largest first'),
+                          ),
+                        ],
+                        icon: const Icon(Icons.sort_rounded),
+                      ),
                       Text('${files.length}'),
                     ],
                   ),
@@ -879,12 +913,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: color.surface,
                         borderRadius: BorderRadius.circular(18),
                       ),
-                      child: const Row(
+                      child: Row(
                         children: [
-                          Icon(Icons.folder_open_rounded),
-                          SizedBox(width: 12),
+                          Icon(
+                            _favoritesOnly
+                                ? Icons.star_border_rounded
+                                : Icons.folder_open_rounded,
+                          ),
+                          const SizedBox(width: 12),
                           Expanded(
-                            child: Text('No saved PDFs yet.'),
+                            child: Text(
+                              _favoritesOnly
+                                  ? 'No favorite PDFs yet.'
+                                  : 'No saved PDFs yet.',
+                            ),
                           ),
                         ],
                       ),
@@ -894,41 +936,121 @@ class _HomeScreenState extends State<HomeScreen> {
                       (item) => Card(
                         child: ListTile(
                           onTap: () => _open(item),
-                          leading: const CircleAvatar(
-                            child: Icon(Icons.picture_as_pdf_rounded),
+                          leading: FutureBuilder<Uint8List?>(
+                            future: _thumbnail(item.path),
+                            builder: (context, snapshot) {
+                              final bytes = snapshot.data;
+                              return SizedBox(
+                                width: 46,
+                                height: 58,
+                                child: bytes == null
+                                    ? DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: color.surfaceContainerHighest,
+                                          borderRadius:
+                                              BorderRadius.circular(7),
+                                        ),
+                                        child: const Icon(
+                                          Icons.picture_as_pdf_rounded,
+                                        ),
+                                      )
+                                    : ClipRRect(
+                                        borderRadius:
+                                            BorderRadius.circular(7),
+                                        child: Image.memory(
+                                          bytes,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                              );
+                            },
                           ),
-                          title: Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          title: Row(
+                            children: [
+                              if (item.favorite) ...[
+                                const Icon(
+                                  Icons.star_rounded,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 4),
+                              ],
+                              Expanded(
+                                child: Text(
+                                  item.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           ),
                           subtitle: Text(
+                            '${_formatFileSize(_fileSizes[item.path] ?? 0)} • '
                             '${item.createdAt.day.toString().padLeft(2, '0')}/'
-                            '${item.createdAt.month.toString().padLeft(2, '0')} '
-                            '${item.createdAt.hour.toString().padLeft(2, '0')}:'
-                            '${item.createdAt.minute.toString().padLeft(2, '0')}',
+                            '${item.createdAt.month.toString().padLeft(2, '0')}/'
+                            '${item.createdAt.year}',
                           ),
                           trailing: PopupMenuButton<String>(
                             onSelected: (value) {
+                              if (value == 'favorite') {
+                                _toggleFavorite(item);
+                              }
                               if (value == 'share') _share(item);
+                              if (value == 'downloads') {
+                                _service
+                                    .savePdfToDownloads(File(item.path))
+                                    .then((_) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Saved a copy to Download/PDFMate',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                }).catchError((error) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Downloads save failed: $error',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  return null;
+                                });
+                              }
                               if (value == 'export') _export(item);
                               if (value == 'rename') _rename(item);
                               if (value == 'delete') _delete(item);
                             },
-                            itemBuilder: (_) => const [
+                            itemBuilder: (_) => [
                               PopupMenuItem(
+                                value: 'favorite',
+                                child: Text(
+                                  item.favorite
+                                      ? 'Remove from favorites'
+                                      : 'Add to favorites',
+                                ),
+                              ),
+                              const PopupMenuItem(
                                 value: 'share',
                                 child: Text('Share'),
                               ),
-                              PopupMenuItem(
+                              const PopupMenuItem(
+                                value: 'downloads',
+                                child: Text('Save copy to Downloads'),
+                              ),
+                              const PopupMenuItem(
                                 value: 'export',
                                 child: Text('Export / Save As'),
                               ),
-                              PopupMenuItem(
+                              const PopupMenuItem(
                                 value: 'rename',
                                 child: Text('Rename'),
                               ),
-                              PopupMenuItem(
+                              const PopupMenuItem(
                                 value: 'delete',
                                 child: Text('Delete'),
                               ),
