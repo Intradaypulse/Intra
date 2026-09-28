@@ -7,6 +7,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'ads_service.dart';
 import 'pdf_service.dart';
+import 'telemetry_service.dart';
 
 class OcrScreen extends StatefulWidget {
   const OcrScreen({super.key, required this.service});
@@ -85,7 +86,7 @@ class _OcrScreenState extends State<OcrScreen> {
           setState(() {
             _source = file;
             _pageCount = count;
-            _heavyUnlocked = count <= 10;
+            _heavyUnlocked = count <= TelemetryService.instance.rewardedOcrThresholdPages;
             _status = '$count page(s) ready for OCR.';
           });
           break;
