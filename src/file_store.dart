@@ -8,16 +8,19 @@ class PdfRecord {
     required this.path,
     required this.name,
     required this.createdAt,
+    this.favorite = false,
   });
 
   final String path;
   final String name;
   final DateTime createdAt;
+  final bool favorite;
 
   Map<String, dynamic> toJson() => {
         'path': path,
         'name': name,
         'createdAt': createdAt.toIso8601String(),
+        'favorite': favorite,
       };
 
   factory PdfRecord.fromJson(Map<String, dynamic> json) => PdfRecord(
@@ -25,13 +28,20 @@ class PdfRecord {
         name: json['name'] as String,
         createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
             DateTime.now(),
+        favorite: json['favorite'] as bool? ?? false,
       );
 
-  PdfRecord copyWith({String? path, String? name, DateTime? createdAt}) =>
+  PdfRecord copyWith({
+    String? path,
+    String? name,
+    DateTime? createdAt,
+    bool? favorite,
+  }) =>
       PdfRecord(
         path: path ?? this.path,
         name: name ?? this.name,
         createdAt: createdAt ?? this.createdAt,
+        favorite: favorite ?? this.favorite,
       );
 }
 
@@ -64,9 +74,15 @@ class PdfFileStore {
 
   Future<void> add(PdfRecord record) async {
     final items = await load();
+    final existing = items.where((e) => e.path == record.path).firstOrNull;
     items.removeWhere((e) => e.path == record.path);
-    items.insert(0, record);
-    await save(items.take(100).toList());
+    items.insert(
+      0,
+      existing == null
+          ? record
+          : record.copyWith(favorite: existing.favorite),
+    );
+    await save(items.take(250).toList());
   }
 
   Future<void> remove(String path) async {
@@ -83,6 +99,14 @@ class PdfFileStore {
     } else {
       items.insert(0, replacement);
     }
+    await save(items);
+  }
+
+  Future<void> setFavorite(String path, bool favorite) async {
+    final items = await load();
+    final index = items.indexWhere((e) => e.path == path);
+    if (index < 0) return;
+    items[index] = items[index].copyWith(favorite: favorite);
     await save(items);
   }
 }
