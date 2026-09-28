@@ -6,6 +6,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdfmate/live_scanner_screen.dart';
 import 'package:pdfmate/pdf_service.dart';
 import 'package:pdfmate/pdf_viewer.dart';
 
@@ -72,6 +73,23 @@ void main() {
 
     if (await pdfFile.exists()) await pdfFile.delete();
     if (await jpgFile.exists()) await jpgFile.delete();
+  });
+
+
+  testWidgets('scanner native camera path starts without an uncaught crash',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: LiveScannerScreen()),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 6));
+
+    expect(find.text('Scan document'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.takeException(), isNull);
   });
 
 }
