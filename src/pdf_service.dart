@@ -14,6 +14,7 @@ import 'package:pdf_manipulator/io.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'pdf_rules.dart';
+import 'scan_temp_session.dart';
 
 enum CompressionPreset { highQuality, balanced, smallest }
 
@@ -106,11 +107,26 @@ class PdfService {
     final dir = await _tmp();
     if (!await dir.exists()) return;
     await for (final entity in dir.list(followLinks: false)) {
-      if (entity is File && isPdfMateManagedTempPath(entity.path)) {
+      if (entity is! File) continue;
+      if (isPdfMateManagedTempPath(entity.path)) {
         _managedTemporaryPaths.add(entity.path);
         await secureDeleteTemporary(entity);
+      } else if (_isScanPageInTemp(entity, dir)) {
+        // A scan still being assembled should not be removed by a second
+        // PdfService instance. Old pages can survive process termination.
+        final modified = await entity.lastModified();
+        if (DateTime.now().difference(modified) > const Duration(hours: 1)) {
+          await ScanTempSession().deletePath(entity.path);
+        }
       }
     }
+  }
+
+  bool _isScanPageInTemp(File file, Directory temp) {
+    final name = file.uri.pathSegments.last;
+    return file.parent.absolute.path == temp.absolute.path &&
+        RegExp(r'^pdfmate_scan_[A-Za-z0-9_-]+\.(jpg|jpeg|png)$')
+            .hasMatch(name);
   }
 
   String _safe(String value) =>
@@ -1160,6 +1176,13 @@ class PdfService {
       }
 
       return output;
+    } catch (_) {
+      // An extraction/encoding failure must not leave a misleading partial
+      // "searchable" document in the user's library.
+      try {
+        if (await output.exists()) await output.delete();
+      } catch (_) {}
+      rethrow;
     } finally {
       await recognizer.close();
       await editor?.dispose();
@@ -1226,12 +1249,12 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      final temp = await _tmp();
       for (final path in paths) {
         try {
           final file = File(path);
-          final name = file.uri.pathSegments.last;
-          if (name.startsWith('pdfmate_scan_') && await file.exists()) {
-            await file.delete();
+          if (_isScanPageInTemp(file, temp) && await file.exists()) {
+            await ScanTempSession().deletePath(path);
           }
         } catch (_) {}
       }
