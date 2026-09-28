@@ -32,6 +32,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   DocumentCorners? _corners;
   AutoCaptureStatus _captureStatus = AutoCaptureStatus.searching;
   final List<File> _pages = [];
+  bool _pagesHandedOff = false;
   final ScanTempSession _tempSession = ScanTempSession();
 
   bool _starting = false;
