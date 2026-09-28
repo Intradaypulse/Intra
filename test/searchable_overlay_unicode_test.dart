@@ -58,6 +58,17 @@ void main() {
         );
         expect(extracted, contains('नमस्ते'));
         expect(extracted, contains('世界'));
+
+        final hindiHits = await searchable.search(
+          query: 'नमस्ते',
+          pages: const PdfPages.all(),
+        );
+        final cjkHits = await searchable.search(
+          query: '世界',
+          pages: const PdfPages.all(),
+        );
+        expect(hindiHits, isNotEmpty);
+        expect(cjkHits, isNotEmpty);
       } finally {
         await searchable.dispose();
       }
