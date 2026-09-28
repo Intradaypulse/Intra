@@ -102,11 +102,11 @@ class _CompressionScreenState extends State<CompressionScreen> {
             const SizedBox(height: 10),
             RadioGroup<CompressionPreset>(
               groupValue: _preset,
-              onChanged: _busy
-                  ? null
-                  : (value) {
-                      if (value != null) setState(() => _preset = value);
-                    },
+              onChanged: (value) {
+                if (!_busy && value != null) {
+                  setState(() => _preset = value);
+                }
+              },
               child: const Column(
                 children: [
                   RadioListTile(
