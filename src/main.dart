@@ -513,6 +513,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+
+  Future<void> _export(PdfRecord record) async {
+    try {
+      final uri = await _service.exportPdf(File(record.path), record.name);
+      if (!mounted || uri == null) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF exported successfully')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _rename(PdfRecord record) async {
     final current = record.name.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '');
     final controller = TextEditingController(text: current);
@@ -811,6 +828,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           trailing: PopupMenuButton<String>(
                             onSelected: (value) {
                               if (value == 'share') _share(item);
+                              if (value == 'export') _export(item);
                               if (value == 'rename') _rename(item);
                               if (value == 'delete') _delete(item);
                             },
@@ -818,6 +836,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               PopupMenuItem(
                                 value: 'share',
                                 child: Text('Share'),
+                              ),
+                              PopupMenuItem(
+                                value: 'export',
+                                child: Text('Export / Save As'),
                               ),
                               PopupMenuItem(
                                 value: 'rename',
