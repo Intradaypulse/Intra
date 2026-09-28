@@ -1082,15 +1082,17 @@ class PdfService {
     }
   }
 
-  Future<File> _makeLatinSearchablePdfPreservingOriginal(
+  Future<File> _makeSearchablePdfPreservingOriginal(
     File source, {
+    required TextRecognitionScript script,
     String? password,
   }) async {
     final engine = Pdf();
     PdfDoc? doc;
     PdfEditor? editor;
-    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    final recognizer = TextRecognizer(script: script);
     final output = await _newFile('Searchable');
+    final verification = <int, List<String>>{};
     var changed = false;
 
     try {
@@ -1098,8 +1100,7 @@ class PdfService {
       editor = await engine.edit(FileSource(source), password: password);
 
       for (var index = 0; index < doc.pageCount; index++) {
-        final existing =
-            await doc.extract(pages: PdfPages.single(index));
+        final existing = await doc.extract(pages: PdfPages.single(index));
         if (existing.trim().isNotEmpty) continue;
 
         Uint8List? pageBytes;
@@ -1116,7 +1117,7 @@ class PdfService {
         if (decoded == null) continue;
 
         final tempImage = await _newManagedTempFile(
-          'latin_ocr_$index',
+          'native_ocr_$index',
           extension: 'png',
         );
         await tempImage.writeAsBytes(pageBytes, flush: true);
@@ -1133,6 +1134,7 @@ class PdfService {
         final info = doc.pages[index];
         final pageWidth = info.effectiveWidth;
         final pageHeight = info.effectiveHeight;
+        final pageTokens = <String>[];
 
         for (final textBlock in recognized.blocks) {
           for (final line in textBlock.lines) {
@@ -1172,10 +1174,16 @@ class PdfService {
                 ),
                 layer: PdfWatermarkLayer.background,
               );
+
+              if (pageTokens.length < 3 && text.runes.length >= 2) {
+                pageTokens.add(text);
+              }
               changed = true;
             }
           }
         }
+
+        if (pageTokens.isNotEmpty) verification[index] = pageTokens;
       }
 
       if (!changed) {
@@ -1197,6 +1205,40 @@ class PdfService {
         } catch (_) {}
         rethrow;
       }
+
+      // The native editor preserves the original page objects, annotations,
+      // forms, bookmarks and vector content. Confirm that the invisible OCR
+      // text actually survives extraction for the selected script. If an OEM
+      // PDF engine cannot encode a script, the caller can fall back to the
+      // raster+embedded-font path instead of returning a broken searchable PDF.
+      if (verification.isNotEmpty) {
+        final verifier = Pdf();
+        PdfDoc? verifyDoc;
+        try {
+          verifyDoc = await verifier.open(FileSource(output));
+          for (final entry in verification.entries) {
+            final extracted = await verifyDoc.extract(
+              pages: PdfPages.single(entry.key),
+            );
+            final normalized = extracted.replaceAll(RegExp(r'\s+'), '');
+            final matched = entry.value.any(
+              (token) => normalized.contains(
+                token.replaceAll(RegExp(r'\s+'), ''),
+              ),
+            );
+            if (!matched) {
+              throw StateError(
+                'Native searchable-PDF text verification failed on '
+                'page ${entry.key + 1}.',
+              );
+            }
+          }
+        } finally {
+          await verifyDoc?.dispose();
+          await verifier.dispose();
+        }
+      }
+
       return output;
     } finally {
       await recognizer.close();
@@ -1429,18 +1471,24 @@ class PdfService {
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
-  }) {
-    if (script == TextRecognitionScript.latin) {
-      return _makeLatinSearchablePdfPreservingOriginal(
+  }) async {
+    try {
+      return await _makeSearchablePdfPreservingOriginal(
         source,
+        script: script,
+        password: password,
+      );
+    } catch (_) {
+      // Some platform PDF engines cannot encode every Unicode script in an
+      // invisible text watermark. The fallback embeds an explicit Noto/system
+      // font so searchability still works, at the cost of rasterizing only
+      // pages that did not already contain text.
+      return _makeUnicodeSearchablePdf(
+        source,
+        script: script,
         password: password,
       );
     }
-    return _makeUnicodeSearchablePdf(
-      source,
-      script: script,
-      password: password,
-    );
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
