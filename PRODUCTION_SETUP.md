@@ -35,3 +35,9 @@ The production workflow rejects Google's sample/test publisher IDs and malformed
 7. Upload `PDFMate-release.aab` to the intended Play Console testing track before production rollout.
 
 Do not paste keystore passwords or private key material into source code, issues, pull requests, or chat messages.
+
+## app-ads.txt
+Before production launch, publish the exact `app-ads.txt` line supplied by the AdMob account on the developer website listed in Google Play. Do not publish a sample publisher ID.
+
+## Runtime behavior
+Debug/beta builds use Google's test ad units when production IDs are absent. Signed production builds fail fast if any required AdMob, Firebase, or signing secret is missing, so a release cannot silently ship with test monetization or disabled telemetry.
