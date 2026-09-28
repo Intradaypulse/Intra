@@ -257,7 +257,7 @@ class AdsService {
 
     AppOpenAd.load(
       adUnitId: appOpenId,
-      adRequest: const AdRequest(),
+      request: const AdRequest(),
       adLoadCallback: AppOpenAdLoadCallback(
         onAdLoaded: (ad) {
           _appOpenAd = ad;
