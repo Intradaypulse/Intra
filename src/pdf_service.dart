@@ -27,6 +27,34 @@ class PdfService {
     return File('${dir.path}/${_safe(prefix)}_$stamp.pdf');
   }
 
+
+  Future<Uint8List?> captureScannedPage({
+    String filter = 'enhance',
+  }) async {
+    final shot = await imagePicker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 95,
+    );
+    if (shot == null) return null;
+    final scanFilter = switch (filter) {
+      'blackWhite' => ScanFilter.blackWhite,
+      'magicColor' => ScanFilter.magicColor,
+      'grayscale' => ScanFilter.grayscale,
+      'none' => ScanFilter.none,
+      _ => ScanFilter.enhance,
+    };
+    final scanner = DocumentScanner();
+    final scanned = await scanner.scan(
+      ScanInput.file(shot.path),
+      filter: scanFilter,
+      output: ScanOutputFormat.png,
+    );
+    return scanned?.bytes ?? await shot.readAsBytes();
+  }
+
+  Future<File> createScannedPdf(List<Uint8List> pages) =>
+      _imagesToPdfBytes(pages, 'Scan');
+
   Future<File?> scanDocument() async {
     final shot = await imagePicker.pickImage(
       source: ImageSource.camera,
