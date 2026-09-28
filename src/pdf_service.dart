@@ -80,7 +80,7 @@ class PdfService {
       if (!await file.exists()) return;
       final length = await file.length();
       if (length > 0) {
-        final handle = await file.open(mode: FileMode.write);
+        final handle = await file.open(mode: FileMode.writeOnly);
         try {
           const chunkSize = 64 * 1024;
           final zeros = Uint8List(chunkSize);
