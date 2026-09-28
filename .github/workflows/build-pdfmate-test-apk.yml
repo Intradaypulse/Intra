@@ -8,6 +8,8 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "test/**"
+      - "integration_test/**"
       - ".github/workflows/build-pdfmate-test-apk.yml"
 
 permissions:
@@ -16,7 +18,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
 
     steps:
       - name: Checkout
@@ -28,10 +30,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Flutter stable
+      - name: Set up Flutter 3.47.5
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: "3.47.5"
           cache: true
 
       - name: Create Android project
@@ -186,12 +188,49 @@ jobs:
           sha256sum PDFMate-Beta-arm64.apk | tee PDFMate-Beta-arm64.apk.sha256
           ls -lh PDFMate-Beta-arm64.apk
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: PDFMate-Beta-APK
           path: |
             PDFMate-Beta-arm64.apk
             PDFMate-Beta-arm64.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build release-candidate universal APK and AAB
+        working-directory: buildapp
+        shell: bash
+        run: |
+          # Generated Flutter projects intentionally use the debug keystore for
+          # local release builds. These artifacts verify release-mode/R8/AAB
+          # architecture only and are never the Play Store signing identity.
+          flutter build apk --release
+          flutter build appbundle --release
+
+      - name: Verify release-candidate artifacts
+        shell: bash
+        run: |
+          test -f buildapp/build/app/outputs/flutter-apk/app-release.apk
+          test -f buildapp/build/app/outputs/bundle/release/app-release.aab
+          cp buildapp/build/app/outputs/flutter-apk/app-release.apk PDFMate-RC-universal.apk
+          cp buildapp/build/app/outputs/bundle/release/app-release.aab PDFMate-RC-test-signed.aab
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose PDFMate-RC-universal.apk
+          jarsigner -verify PDFMate-RC-test-signed.aab
+          sha256sum PDFMate-RC-universal.apk | tee PDFMate-RC-universal.apk.sha256
+          sha256sum PDFMate-RC-test-signed.aab | tee PDFMate-RC-test-signed.aab.sha256
+          ls -lh PDFMate-RC-universal.apk PDFMate-RC-test-signed.aab
+
+      - name: Upload release-candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Release-Candidate
+          path: |
+            PDFMate-RC-universal.apk
+            PDFMate-RC-universal.apk.sha256
+            PDFMate-RC-test-signed.aab
+            PDFMate-RC-test-signed.aab.sha256
           if-no-files-found: error
           retention-days: 14
