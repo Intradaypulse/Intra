@@ -35,8 +35,10 @@ class AdsService {
     defaultValue: _appOpenTestId,
   );
 
-  static const int _interstitialEvery =
+  static const int _defaultInterstitialEvery =
       int.fromEnvironment('INTERSTITIAL_EVERY', defaultValue: 3);
+
+  int _interstitialEvery = _defaultInterstitialEvery;
 
   static const _sessionKey = 'pdfmate_ad_sessions';
   static const _lastAppOpenKey = 'pdfmate_last_app_open_ms';
@@ -59,6 +61,10 @@ class AdsService {
   bool get canRequestAds => _canRequestAds;
   bool get privacyOptionsRequired => _privacyOptionsRequired;
   bool get rewardedAvailable => _rewarded != null;
+  void configureInterstitialFrequency(int every) {
+    _interstitialEvery = every.clamp(2, 10);
+  }
+
 
   bool get usingTestIds =>
       bannerId == _bannerTestId ||
