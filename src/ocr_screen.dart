@@ -8,6 +8,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'ads_service.dart';
 import 'pdf_service.dart';
+import 'pdf_rules.dart';
 import 'telemetry_service.dart';
 
 class OcrScreen extends StatefulWidget {
@@ -123,20 +124,12 @@ class _OcrScreenState extends State<OcrScreen> {
 
 
   Future<bool> _ensureLargeOcrUnlocked() async {
-    if (_pageCount <= 10 || _heavyUnlocked) return true;
-
-    // If no rewarded ad is currently loaded, don't make the document tool
-    // unusable; continue and preload for the next heavy task.
-    if (!AdsService.instance.rewardedAvailable) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Rewarded ad is not ready — processing this large PDF without an ad.',
-            ),
-          ),
-        );
-      }
+    final threshold = TelemetryService.instance.rewardedOcrThresholdPages;
+    if (!needsRewardedOcrGate(
+      pageCount: _pageCount,
+      threshold: threshold,
+      alreadyUnlocked: _heavyUnlocked,
+    )) {
       return true;
     }
 
@@ -145,7 +138,9 @@ class _OcrScreenState extends State<OcrScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Large OCR job'),
         content: Text(
-          'This PDF has $_pageCount pages. Watch one rewarded ad to unlock the full OCR/searchable-PDF job.',
+          'This PDF has $_pageCount pages. Watch one rewarded ad to unlock '
+          'the full OCR/searchable-PDF job. Files with $threshold pages or '
+          'fewer remain free.',
         ),
         actions: [
           TextButton(
@@ -162,10 +157,60 @@ class _OcrScreenState extends State<OcrScreen> {
     );
 
     if (watch != true) return false;
-    final earned = await AdsService.instance.showRewarded();
-    if (!earned) return false;
-    _heavyUnlocked = true;
-    return true;
+
+    final outcome = await AdsService.instance.showRewardedGate();
+    switch (outcome) {
+      case RewardedAdOutcome.earned:
+        _heavyUnlocked = true;
+        await TelemetryService.instance.logEvent(
+          'rewarded_ocr_unlocked',
+          parameters: {'pages': _pageCount},
+        );
+        return true;
+      case RewardedAdOutcome.dismissed:
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Ad closed before the reward was earned.'),
+            ),
+          );
+        }
+        return false;
+      case RewardedAdOutcome.failed:
+      case RewardedAdOutcome.unavailable:
+        if (!mounted) return false;
+        final continueOnce = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Ad unavailable'),
+            content: const Text(
+              'The rewarded ad could not be served right now. '
+              'You can retry later or continue this job once without an ad. '
+              'PDFMate will never silently block your document because the '
+              'ad network is unavailable.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Continue once'),
+              ),
+            ],
+          ),
+        );
+        if (continueOnce == true) {
+          _heavyUnlocked = true;
+          await TelemetryService.instance.logEvent(
+            'rewarded_ocr_grace_unlock',
+            parameters: {'pages': _pageCount},
+          );
+          return true;
+        }
+        return false;
+    }
   }
 
   Future<void> _extract() async {
