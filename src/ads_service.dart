@@ -55,6 +55,7 @@ class AdsService {
   StreamSubscription<AppState>? _appStateSubscription;
 
   int _completedOperations = 0;
+  bool _appOpenEnabled = true;
   int _sessionCount = 0;
   bool _isShowingFullScreenAd = false;
 
@@ -63,6 +64,10 @@ class AdsService {
   bool get rewardedAvailable => _rewarded != null;
   void configureInterstitialFrequency(int every) {
     _interstitialEvery = every.clamp(2, 10);
+  }
+
+  void configureAppOpenEnabled(bool enabled) {
+    _appOpenEnabled = enabled;
   }
 
 
@@ -280,7 +285,7 @@ class AdsService {
 
   Future<void> showAppOpenIfEligible() async {
     // Google recommends waiting until users have used the app a few times.
-    if (!_canRequestAds || _sessionCount < 3 || _isShowingFullScreenAd) return;
+    if (!_appOpenEnabled || !_canRequestAds || _sessionCount < 3 || _isShowingFullScreenAd) return;
 
     final prefs = await SharedPreferences.getInstance();
     final lastMs = prefs.getInt(_lastAppOpenKey);
