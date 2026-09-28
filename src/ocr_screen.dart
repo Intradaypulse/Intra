@@ -224,9 +224,7 @@ class _OcrScreenState extends State<OcrScreen> {
   Future<void> _extract() async {
     final source = _source;
     if (source == null) return;
-    if (!await _confirmSignedPdfModification()) return;
     if (!await _ensureLargeOcrUnlocked()) return;
-    if (!await _confirmSignedPdfModification()) return;
 
     setState(() {
       _busy = true;
@@ -292,6 +290,7 @@ class _OcrScreenState extends State<OcrScreen> {
     final source = _source;
     if (source == null) return;
     if (!await _ensureLargeOcrUnlocked()) return;
+    if (!await _confirmSignedPdfModification()) return;
 
     setState(() {
       _busy = true;
