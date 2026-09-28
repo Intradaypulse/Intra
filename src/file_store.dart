@@ -74,7 +74,13 @@ class PdfFileStore {
 
   Future<void> add(PdfRecord record) async {
     final items = await load();
-    final existing = items.where((e) => e.path == record.path).firstOrNull;
+    PdfRecord? existing;
+    for (final item in items) {
+      if (item.path == record.path) {
+        existing = item;
+        break;
+      }
+    }
     items.removeWhere((e) => e.path == record.path);
     items.insert(
       0,
