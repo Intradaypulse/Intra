@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,7 +21,6 @@ import 'file_store.dart';
 import 'live_scanner_screen.dart';
 import 'pdf_service.dart';
 import 'pdf_viewer.dart';
-import 'signature_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -605,6 +603,23 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: AdsService.instance.showPrivacyOptions,
               icon: const Icon(Icons.privacy_tip_outlined),
             ),
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: () async {
+              await Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => SettingsScreen(
+                    themeMode: widget.themeMode,
+                    autoSaveDownloads: widget.autoSaveDownloads,
+                    onThemeChanged: widget.onThemeChanged,
+                    onAutoSaveChanged: widget.onAutoSaveChanged,
+                  ),
+                ),
+              );
+              if (mounted) setState(() {});
+            },
+            icon: const Icon(Icons.settings_outlined),
+          ),
         ],
       ),
       body: SafeArea(
@@ -678,67 +693,80 @@ class _HomeScreenState extends State<HomeScreen> {
                       _ToolCard(
                         icon: Icons.image_rounded,
                         title: 'Image to PDF',
+                        subtitle: 'File-backed',
                         onTap: _busy ? null : _imagesToPdf,
                       ),
                       _ToolCard(
                         icon: Icons.compress_rounded,
                         title: 'Compress PDF',
+                        subtitle: '3 quality levels',
                         onTap: _busy ? null : _compress,
                       ),
                       _ToolCard(
                         icon: Icons.call_merge_rounded,
                         title: 'Merge PDF',
+                        subtitle: 'Preview + reorder',
                         onTap: _busy ? null : _merge,
                       ),
                       _ToolCard(
                         icon: Icons.content_cut_rounded,
                         title: 'Split PDF',
+                        subtitle: 'Ranges / every N',
                         onTap: _busy ? null : _split,
                       ),
                       _ToolCard(
-                        icon: Icons.rotate_right_rounded,
-                        title: 'Rotate PDF',
-                        onTap: _busy ? null : _rotate,
+                        icon: Icons.view_module_rounded,
+                        title: 'Organize pages',
+                        subtitle: 'Reorder / rotate / delete',
+                        onTap: _busy ? null : _organize,
                       ),
                       _ToolCard(
-                        icon: Icons.lock_rounded,
-                        title: 'Protect PDF',
-                        onTap: _busy ? null : _protect,
-                      ),
-                      _ToolCard(
-                        icon: Icons.text_snippet_outlined,
-                        title: 'OCR image',
-                        onTap: _busy ? null : _ocr,
-                      ),
-                      _ToolCard(
-                        icon: Icons.text_fields_rounded,
-                        title: 'Extract PDF text',
-                        onTap: _busy ? null : _extractPdfText,
-                      ),
-                      _ToolCard(
-                        icon: Icons.photo_library_outlined,
-                        title: 'PDF to JPG',
-                        onTap: _busy ? null : _pdfToJpg,
-                      ),
-                      _ToolCard(
-                        icon: Icons.delete_outline_rounded,
-                        title: 'Delete pages',
-                        onTap: _busy ? null : _deletePages,
-                      ),
-                      _ToolCard(
-                        icon: Icons.reorder_rounded,
-                        title: 'Reorder pages',
-                        onTap: _busy ? null : _reorderPages,
+                        icon: Icons.manage_search_rounded,
+                        title: 'OCR PDF',
+                        subtitle: 'Multilingual + searchable',
+                        onTap: _busy ? null : _ocrPdf,
                       ),
                       _ToolCard(
                         icon: Icons.draw_rounded,
                         title: 'Sign PDF',
+                        subtitle: 'Move / resize / rotate',
                         onTap: _busy ? null : _signPdf,
+                      ),
+                      _ToolCard(
+                        icon: Icons.lock_rounded,
+                        title: 'Protect PDF',
+                        subtitle: 'AES-256 + permissions',
+                        onTap: _busy
+                            ? null
+                            : () => _security(SecurityMode.protect),
+                      ),
+                      _ToolCard(
+                        icon: Icons.lock_open_rounded,
+                        title: 'Unlock PDF',
+                        subtitle: 'Remove password',
+                        onTap: _busy
+                            ? null
+                            : () => _security(SecurityMode.unlock),
+                      ),
+                      _ToolCard(
+                        icon: Icons.photo_library_outlined,
+                        title: 'PDF to JPG',
+                        subtitle: 'Preview + Gallery',
+                        onTap: _busy ? null : _pdfToJpg,
+                      ),
+                      _ToolCard(
+                        icon: Icons.text_fields_rounded,
+                        title: 'Extract text',
+                        subtitle: 'Embedded text',
+                        onTap: _busy ? null : _extractPdfText,
                       ),
                       _ToolCard(
                         icon: Icons.visibility_rounded,
                         title: 'PDF viewer',
-                        onTap: _files.isEmpty ? null : () => _open(_files.first),
+                        subtitle: 'Search + thumbnails',
+                        onTap: _files.isEmpty
+                            ? null
+                            : () => _open(_files.first),
                       ),
                     ],
                   ),
@@ -868,10 +896,12 @@ class _ToolCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.onTap,
+    this.subtitle = 'Working',
   });
 
   final IconData icon;
   final String title;
+  final String subtitle;
   final VoidCallback? onTap;
 
   @override
@@ -893,9 +923,11 @@ class _ToolCard extends StatelessWidget {
                 title,
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              const Text(
-                'Working',
-                style: TextStyle(fontSize: 12),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),
