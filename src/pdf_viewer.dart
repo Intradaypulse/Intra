@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -273,10 +274,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   void dispose() {
     _controller?.dispose();
-    final temp = _temporaryDecrypted;
-    if (temp != null) {
-      temp.delete().catchError((_) => temp);
-    }
+    unawaited(_service.secureDeleteTemporary(_temporaryDecrypted));
     super.dispose();
   }
 
