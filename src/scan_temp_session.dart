@@ -1,14 +1,16 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 class ScanTempSession {
   ScanTempSession({Future<void> Function(File file)? deleteFile})
-      : _deleteFile = deleteFile ?? _defaultDelete;
+    : _deleteFile = deleteFile ?? _defaultDelete;
 
   final Future<void> Function(File file) _deleteFile;
   final Set<String> _ownedPaths = <String>{};
   bool _handedOff = false;
+  bool _closed = false;
 
   static Future<void> _defaultDelete(File file) async {
     try {
@@ -41,7 +43,12 @@ class ScanTempSession {
   bool get handedOff => _handedOff;
 
   void own(String path) {
-    if (path.isNotEmpty) _ownedPaths.add(path);
+    if (path.isEmpty) return;
+    if (_closed) {
+      unawaited(_deleteFile(File(path)));
+      return;
+    }
+    _ownedPaths.add(path);
   }
 
   void forget(String path) => _ownedPaths.remove(path);
@@ -61,6 +68,7 @@ class ScanTempSession {
   }
 
   Future<void> cleanupOwned() async {
+    _closed = true;
     final paths = List<String>.from(_ownedPaths);
     _ownedPaths.clear();
     for (final path in paths) {

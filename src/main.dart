@@ -27,9 +27,12 @@ import 'pdf_viewer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  runApp(const PDFMateApp());
+  unawaited(_initializeTelemetry());
+}
+
+Future<void> _initializeTelemetry() async {
   await TelemetryService.instance.initialize();
   AdsService.instance.configureInterstitialFrequency(
     TelemetryService.instance.interstitialEvery,
@@ -37,7 +40,6 @@ Future<void> main() async {
   AdsService.instance.configureAppOpenEnabled(
     TelemetryService.instance.appOpenEnabled,
   );
-  runApp(const PDFMateApp());
 }
 
 class PDFMateApp extends StatefulWidget {
@@ -115,13 +117,13 @@ class _PDFMateAppState extends State<PDFMateApp> {
       home: !_ready
           ? const _LaunchScreen()
           : !_onboardingComplete
-              ? OnboardingScreen(onFinished: _finishOnboarding)
-              : HomeScreen(
-                  themeMode: _themeMode,
-                  autoSaveDownloads: _autoSaveDownloads,
-                  onThemeChanged: _setTheme,
-                  onAutoSaveChanged: _setAutoSave,
-                ),
+          ? OnboardingScreen(onFinished: _finishOnboarding)
+          : HomeScreen(
+              themeMode: _themeMode,
+              autoSaveDownloads: _autoSaveDownloads,
+              onThemeChanged: _setTheme,
+              onAutoSaveChanged: _setAutoSave,
+            ),
     );
   }
 }
@@ -153,10 +155,9 @@ class _LaunchScreen extends StatelessWidget {
             const SizedBox(height: 18),
             Text(
               'PDFMate',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 18),
             const SizedBox(
@@ -211,15 +212,30 @@ class _HomeScreenState extends State<HomeScreen> {
     unawaited(_service.cleanupStaleTemporaryFiles());
     _loadFiles();
     _search.addListener(() => setState(() {}));
+    AdsService.instance.adsAllowed.addListener(_refreshBanner);
     _initializeAds();
   }
 
   Future<void> _initializeAds() async {
-    await AdsService.instance.initialize();
+    try {
+      await AdsService.instance.initialize();
+    } catch (e) {
+      debugPrint('Ads initialization unavailable: $e');
+    }
     if (!mounted) return;
-    _banner = AdsService.instance.createBanner(
+    _refreshBanner();
+  }
+
+  void _refreshBanner() {
+    if (!mounted) return;
+    final ads = AdsService.instance;
+    ads.releaseBanner(_banner);
+    _banner = ads.createBanner(
       onChanged: () {
-        if (mounted) setState(() {});
+        if (!mounted) return;
+        setState(() {
+          if (_banner != null && !ads.isBannerActive(_banner!)) _banner = null;
+        });
       },
     );
     setState(() {});
@@ -228,7 +244,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _thumbnailFutures.clear();
-    _banner?.dispose();
+    AdsService.instance.adsAllowed.removeListener(_refreshBanner);
+    AdsService.instance.releaseBanner(_banner);
     _search.dispose();
     super.dispose();
   }
@@ -263,10 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<Uint8List?> _loadThumbnail(String path) async {
     try {
-      return await _service.renderFirstThumbnail(
-        File(path),
-        width: 150,
-      );
+      return await _service.renderFirstThumbnail(File(path), width: 150);
     } catch (_) {
       return null;
     }
@@ -301,7 +315,7 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Text(
           automatic
               ? 'PDF is safe inside PDFMate, but the Downloads backup failed. '
-                  'Retry to create the external copy.'
+                    'Retry to create the external copy.'
               : 'Could not save the PDF to Downloads: $error',
         ),
         actions: [
@@ -324,11 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (!mounted) return;
                 messenger.hideCurrentMaterialBanner();
                 unawaited(
-                  _showDownloadsFailure(
-                    file,
-                    retryError,
-                    automatic: false,
-                  ),
+                  _showDownloadsFailure(file, retryError, automatic: false),
                 );
               }
             },
@@ -370,10 +380,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadFiles();
   }
 
-  Future<void> _runFileTask(
-    String label,
-    Future<File?> Function() task,
-  ) async {
+  Future<void> _runFileTask(String label, Future<File?> Function() task) async {
     setState(() => _busy = true);
     try {
       final output = await task();
@@ -385,16 +392,17 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Text('$label complete'),
           action: SnackBarAction(
             label: 'Open',
-            onPressed: () => _openPath(output.path, output.uri.pathSegments.last),
+            onPressed: () =>
+                _openPath(output.path, output.uri.pathSegments.last),
           ),
         ),
       );
       await AdsService.instance.recordCompletedOperation();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$label failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$label failed: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -424,9 +432,9 @@ class _HomeScreenState extends State<HomeScreen> {
       await AdsService.instance.recordCompletedOperation();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Scan failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Scan failed: $e')));
       }
     } finally {
       for (final path in pagePaths) {
@@ -442,10 +450,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _imagesToPdf() =>
       _runFileTask('Image to PDF', _service.imagesToPdf);
 
-  Future<void> _completeAdvancedFile(
-    String label,
-    File? output,
-  ) async {
+  Future<void> _completeAdvancedFile(String label, File? output) async {
     if (output == null) return;
     setState(() => _busy = true);
     try {
@@ -456,10 +461,8 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Text('$label complete'),
           action: SnackBarAction(
             label: 'Open',
-            onPressed: () => _openPath(
-              output.path,
-              output.uri.pathSegments.last,
-            ),
+            onPressed: () =>
+                _openPath(output.path, output.uri.pathSegments.last),
           ),
         ),
       );
@@ -471,27 +474,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _compress() async {
     final output = await Navigator.of(context).push<File>(
-      MaterialPageRoute(
-        builder: (_) => CompressionScreen(service: _service),
-      ),
+      MaterialPageRoute(builder: (_) => CompressionScreen(service: _service)),
     );
     await _completeAdvancedFile('Compression', output);
   }
 
   Future<void> _merge() async {
     final output = await Navigator.of(context).push<File>(
-      MaterialPageRoute(
-        builder: (_) => AdvancedMergeScreen(service: _service),
-      ),
+      MaterialPageRoute(builder: (_) => AdvancedMergeScreen(service: _service)),
     );
     await _completeAdvancedFile('Merge', output);
   }
 
   Future<void> _split() async {
     final outputs = await Navigator.of(context).push<List<File>>(
-      MaterialPageRoute(
-        builder: (_) => AdvancedSplitScreen(service: _service),
-      ),
+      MaterialPageRoute(builder: (_) => AdvancedSplitScreen(service: _service)),
     );
     if (outputs == null || outputs.isEmpty) return;
 
@@ -512,9 +509,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _organize() async {
     final output = await Navigator.of(context).push<File>(
-      MaterialPageRoute(
-        builder: (_) => PageOrganizerScreen(service: _service),
-      ),
+      MaterialPageRoute(builder: (_) => PageOrganizerScreen(service: _service)),
     );
     await _completeAdvancedFile('Page organization', output);
   }
@@ -531,10 +526,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _security(SecurityMode mode) async {
     final output = await Navigator.of(context).push<File>(
       MaterialPageRoute(
-        builder: (_) => SecurityScreen(
-          service: _service,
-          initialMode: mode,
-        ),
+        builder: (_) => SecurityScreen(service: _service, initialMode: mode),
       ),
     );
     await _completeAdvancedFile(
@@ -545,18 +537,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _ocrPdf() async {
     final output = await Navigator.of(context).push<File>(
-      MaterialPageRoute(
-        builder: (_) => OcrScreen(service: _service),
-      ),
+      MaterialPageRoute(builder: (_) => OcrScreen(service: _service)),
     );
     await _completeAdvancedFile('Searchable PDF', output);
   }
 
   Future<void> _pdfToJpg() async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => PdfToJpgScreen(service: _service),
-      ),
+      MaterialPageRoute(builder: (_) => PdfToJpgScreen(service: _service)),
     );
   }
 
@@ -589,15 +577,14 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Text extraction failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Text extraction failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
-
 
   void _open(PdfRecord record) => _openPath(record.path, record.name);
 
@@ -611,13 +598,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _share(PdfRecord record) async {
     await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(record.path)],
-        text: 'Created with PDFMate',
-      ),
+      ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'),
     );
   }
-
 
   Future<void> _export(PdfRecord record) async {
     try {
@@ -628,15 +611,18 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     }
   }
 
   Future<void> _rename(PdfRecord record) async {
-    final current = record.name.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '');
+    final current = record.name.replaceFirst(
+      RegExp(r'\.pdf$', caseSensitive: false),
+      '',
+    );
     final controller = TextEditingController(text: current);
     final value = await showDialog<String>(
       context: context,
@@ -668,18 +654,23 @@ class _HomeScreenState extends State<HomeScreen> {
     controller.dispose();
     if (value == null) return;
 
-    final source = File(record.path);
-    final safe = value.replaceAll(RegExp(r'[^A-Za-z0-9._ -]+'), '_');
-    final newPath = '${source.parent.path}/$safe.pdf';
-    final renamed = await source.rename(newPath);
-    await _store.replace(
-      record.path,
-      record.copyWith(
-        path: renamed.path,
-        name: '$safe.pdf',
-      ),
-    );
-    await _loadFiles();
+    try {
+      final renamed = await _service.renamePdf(File(record.path), value);
+      await _store.replace(
+        record.path,
+        record.copyWith(
+          path: renamed.path,
+          name: renamed.uri.pathSegments.last,
+        ),
+      );
+      await _loadFiles();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Rename failed: $e')));
+      }
+    }
   }
 
   Future<void> _delete(PdfRecord record) async {
@@ -711,8 +702,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final query = _search.text.trim().toLowerCase();
     final result = _files.where((record) {
       if (_favoritesOnly && !record.favorite) return false;
-      if (query.isNotEmpty &&
-          !record.name.toLowerCase().contains(query)) {
+      if (query.isNotEmpty && !record.name.toLowerCase().contains(query)) {
         return false;
       }
       return true;
@@ -794,9 +784,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Text(
                           'Scan. Edit. Share.',
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineMedium
+                          style: Theme.of(context).textTheme.headlineMedium
                               ?.copyWith(
                                 fontWeight: FontWeight.w800,
                                 color: color.onPrimary,
@@ -827,10 +815,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 22),
                   Text(
                     'PDF tools',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w800),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   GridView.count(
@@ -935,19 +922,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Text(
                         'My PDFs',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                       const Spacer(),
                       IconButton(
                         tooltip: _favoritesOnly
                             ? 'Show all PDFs'
                             : 'Show favorites',
-                        onPressed: () => setState(
-                          () => _favoritesOnly = !_favoritesOnly,
-                        ),
+                        onPressed: () =>
+                            setState(() => _favoritesOnly = !_favoritesOnly),
                         icon: Icon(
                           _favoritesOnly
                               ? Icons.star_rounded
@@ -1006,107 +991,109 @@ class _HomeScreenState extends State<HomeScreen> {
                     )
                   else
                     ...files.map(
-                      (item) => Card(
-                        child: ListTile(
-                          onTap: () => _open(item),
-                          leading: FutureBuilder<Uint8List?>(
-                            future: _thumbnail(item.path),
-                            builder: (context, snapshot) {
-                              final bytes = snapshot.data;
-                              return SizedBox(
-                                width: 46,
-                                height: 58,
-                                child: bytes == null
-                                    ? DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: color.surfaceContainerHighest,
-                                          borderRadius:
-                                              BorderRadius.circular(7),
+                      (item) => Builder(
+                        builder: (context) => Card(
+                          child: ListTile(
+                            onTap: () => _open(item),
+                            leading: FutureBuilder<Uint8List?>(
+                              future: _thumbnail(item.path),
+                              builder: (context, snapshot) {
+                                final bytes = snapshot.data;
+                                return SizedBox(
+                                  width: 46,
+                                  height: 58,
+                                  child: bytes == null
+                                      ? DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            color:
+                                                color.surfaceContainerHighest,
+                                            borderRadius: BorderRadius.circular(
+                                              7,
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.picture_as_pdf_rounded,
+                                          ),
+                                        )
+                                      : ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            7,
+                                          ),
+                                          child: Image.memory(
+                                            bytes,
+                                            fit: BoxFit.cover,
+                                          ),
                                         ),
-                                        child: const Icon(
-                                          Icons.picture_as_pdf_rounded,
-                                        ),
-                                      )
-                                    : ClipRRect(
-                                        borderRadius:
-                                            BorderRadius.circular(7),
-                                        child: Image.memory(
-                                          bytes,
-                                          fit: BoxFit.cover,
-                                        ),
-                                      ),
-                              );
-                            },
-                          ),
-                          title: Row(
-                            children: [
-                              if (item.favorite) ...[
-                                const Icon(
-                                  Icons.star_rounded,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 4),
-                              ],
-                              Expanded(
-                                child: Text(
-                                  item.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          subtitle: Text(
-                            '${_formatFileSize(_fileSizes[item.path] ?? 0)} • '
-                            '${item.createdAt.day.toString().padLeft(2, '0')}/'
-                            '${item.createdAt.month.toString().padLeft(2, '0')}/'
-                            '${item.createdAt.year}',
-                          ),
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (value) {
-                              if (value == 'favorite') {
-                                _toggleFavorite(item);
-                              }
-                              if (value == 'share') _share(item);
-                              if (value == 'downloads') {
-                                unawaited(
-                                  _saveCopyToDownloads(File(item.path)),
                                 );
-                              }
-                              if (value == 'export') _export(item);
-                              if (value == 'rename') _rename(item);
-                              if (value == 'delete') _delete(item);
-                            },
-                            itemBuilder: (_) => [
-                              PopupMenuItem(
-                                value: 'favorite',
-                                child: Text(
-                                  item.favorite
-                                      ? 'Remove from favorites'
-                                      : 'Add to favorites',
+                              },
+                            ),
+                            title: Row(
+                              children: [
+                                if (item.favorite) ...[
+                                  const Icon(Icons.star_rounded, size: 16),
+                                  const SizedBox(width: 4),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    item.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'share',
-                                child: Text('Share'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'downloads',
-                                child: Text('Save copy to Downloads'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'export',
-                                child: Text('Export / Save As'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'rename',
-                                child: Text('Rename'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Delete'),
-                              ),
-                            ],
+                              ],
+                            ),
+                            subtitle: Text(
+                              '${_formatFileSize(_fileSizes[item.path] ?? 0)} • '
+                              '${item.createdAt.day.toString().padLeft(2, '0')}/'
+                              '${item.createdAt.month.toString().padLeft(2, '0')}/'
+                              '${item.createdAt.year}',
+                            ),
+                            trailing: PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'favorite') {
+                                  _toggleFavorite(item);
+                                }
+                                if (value == 'share') _share(item);
+                                if (value == 'downloads') {
+                                  unawaited(
+                                    _saveCopyToDownloads(File(item.path)),
+                                  );
+                                }
+                                if (value == 'export') _export(item);
+                                if (value == 'rename') _rename(item);
+                                if (value == 'delete') _delete(item);
+                              },
+                              itemBuilder: (_) => [
+                                PopupMenuItem(
+                                  value: 'favorite',
+                                  child: Text(
+                                    item.favorite
+                                        ? 'Remove from favorites'
+                                        : 'Add to favorites',
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'share',
+                                  child: Text('Share'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'downloads',
+                                  child: Text('Save copy to Downloads'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'export',
+                                  child: Text('Export / Save As'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'rename',
+                                  child: Text('Rename'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Delete'),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -1171,10 +1158,7 @@ class _ToolCard extends StatelessWidget {
             children: [
               Icon(icon, size: 30),
               const Spacer(),
-              Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
               Text(
                 subtitle,
                 maxLines: 1,

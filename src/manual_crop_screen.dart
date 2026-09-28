@@ -47,6 +47,7 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
   DocumentCorners? _corners;
   Size? _imageSize;
   bool _busy = true;
+  String? _error;
   ScanFilter _filter = ScanFilter.enhance;
 
   @override
@@ -56,29 +57,44 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
   }
 
   Future<void> _prepare() async {
-    final size = await _decodeSize(widget.imagePath);
-    final detected = widget.initialCorners ??
-        await _detector.detect(
-          ScanInput.file(widget.imagePath),
-          sensitivity: DetectionSensitivity.lenient,
-        );
-    if (!mounted) return;
     setState(() {
-      _imageSize = size;
-      _corners = detected ?? _fallback;
-      _busy = false;
+      _busy = true;
+      _error = null;
     });
+    try {
+      final size = await _decodeSize(widget.imagePath);
+      if (size == null) throw StateError('The photo could not be opened.');
+      final detected =
+          widget.initialCorners ??
+          await _detector.detect(
+            ScanInput.file(widget.imagePath),
+            sensitivity: DetectionSensitivity.lenient,
+          );
+      if (!mounted) return;
+      setState(() {
+        _imageSize = size;
+        _corners = detected ?? _fallback;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not prepare photo: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<Size?> _decodeSize(String path) async {
     try {
       final bytes = await File(path).readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final image = frame.image;
-      final size = Size(image.width.toDouble(), image.height.toDouble());
-      image.dispose();
-      return size;
+      try {
+        final frame = await codec.getNextFrame();
+        final image = frame.image;
+        final size = Size(image.width.toDouble(), image.height.toDouble());
+        image.dispose();
+        return size;
+      } finally {
+        codec.dispose();
+      }
     } catch (_) {
       return null;
     }
@@ -122,6 +138,11 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
           height: scan.height,
         ),
       );
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not crop photo: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -137,7 +158,7 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
         title: const Text('Adjust document'),
         actions: [
           TextButton(
-            onPressed: _busy ? null : _confirm,
+            onPressed: _busy || _corners == null ? null : _confirm,
             child: const Text('Use'),
           ),
         ],
@@ -147,7 +168,18 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
           children: [
             Expanded(
               child: Center(
-                child: _busy || size == null || corners == null
+                child: _error != null
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_error!, textAlign: TextAlign.center),
+                          TextButton(
+                            onPressed: _prepare,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : _busy || size == null || corners == null
                     ? const CircularProgressIndicator()
                     : FittedBox(
                         fit: BoxFit.contain,
