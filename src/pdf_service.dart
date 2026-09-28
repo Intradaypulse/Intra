@@ -1007,7 +1007,7 @@ class PdfService {
     }
   }
 
-  Future<String> savePdfToDownloads(File source) async {
+  Future<String?> savePdfToDownloads(File source) async {
     final rawName = source.uri.pathSegments.last;
     final name = rawName.replaceFirst(
       RegExp(r'\.pdf$', caseSensitive: false),
@@ -1022,7 +1022,7 @@ class PdfService {
     );
   }
 
-  Future<String> saveJpgToGallery(File source) async {
+  Future<String?> saveJpgToGallery(File source) async {
     final rawName = source.uri.pathSegments.last;
     final name = rawName.replaceFirst(
       RegExp(r'\.(jpg|jpeg)$', caseSensitive: false),
@@ -1032,7 +1032,8 @@ class PdfService {
       name: name,
       filePath: source.path,
       fileExtension: 'jpg',
-      mimeType: MimeType.jpeg,
+      mimeType: MimeType.custom,
+      customMimeType: 'image/jpeg',
       album: 'PDFMate',
     );
   }
