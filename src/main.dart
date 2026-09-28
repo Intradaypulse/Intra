@@ -427,6 +427,12 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     } finally {
+      for (final path in pagePaths) {
+        try {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
       if (mounted) setState(() => _busy = false);
     }
   }
