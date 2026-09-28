@@ -10,14 +10,12 @@ class _PageItem {
   _PageItem({
     required this.originalIndex,
     required this.thumb,
-    this.rotation = 0,
-    this.selected = false,
   });
 
   final int originalIndex;
   final Uint8List thumb;
-  int rotation;
-  bool selected;
+  int rotation = 0;
+  bool selected = false;
 }
 
 class PageOrganizerScreen extends StatefulWidget {
