@@ -422,7 +422,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                               ),
                             Expanded(
                               child: PdfViewPinch(
-                                key: const ValueKey('pdf_native_viewer'),
                                 controller: controller,
                                 onPageChanged: (page) {
                                   if (mounted) {
