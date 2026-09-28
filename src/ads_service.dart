@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum RewardedAdOutcome { earned, unavailable, dismissed, failed }
+
 class AdsService {
   AdsService._();
 
@@ -49,6 +51,7 @@ class AdsService {
 
   InterstitialAd? _interstitial;
   RewardedAd? _rewarded;
+  Completer<bool>? _rewardedLoadCompleter;
   AppOpenAd? _appOpenAd;
   DateTime? _appOpenLoadTime;
 
@@ -58,10 +61,16 @@ class AdsService {
   bool _appOpenEnabled = true;
   int _sessionCount = 0;
   bool _isShowingFullScreenAd = false;
+  DateTime? _lastFullScreenAdAt;
 
   bool get canRequestAds => _canRequestAds;
   bool get privacyOptionsRequired => _privacyOptionsRequired;
   bool get rewardedAvailable => _rewarded != null;
+  bool get recentlyShowedFullScreenAd {
+    final last = _lastFullScreenAdAt;
+    return last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 2);
+  }
   void configureInterstitialFrequency(int every) {
     _interstitialEvery = every.clamp(2, 10);
   }
@@ -180,6 +189,7 @@ class AdsService {
 
   Future<void> recordCompletedOperation() async {
     _completedOperations++;
+    if (recentlyShowedFullScreenAd) return;
     if (_interstitialEvery <= 0 ||
         _completedOperations % _interstitialEvery != 0) {
       return;
@@ -210,36 +220,83 @@ class AdsService {
       },
     );
     ad.show();
+    _lastFullScreenAdAt = DateTime.now();
     await completer.future;
   }
 
   void _loadRewarded() {
     if (!_canRequestAds || _rewarded != null) return;
+    InterstitialAd? unused;
     RewardedAd.load(
       adUnitId: rewardedId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: (ad) => _rewarded = ad,
+        onAdLoaded: (ad) {
+          _rewarded = ad;
+          final completer = _rewardedLoadCompleter;
+          if (completer != null && !completer.isCompleted) {
+            completer.complete(true);
+          }
+          _rewardedLoadCompleter = null;
+        },
         onAdFailedToLoad: (error) {
           debugPrint('Rewarded failed: $error');
           _rewarded = null;
+          final completer = _rewardedLoadCompleter;
+          if (completer != null && !completer.isCompleted) {
+            completer.complete(false);
+          }
+          _rewardedLoadCompleter = null;
         },
       ),
     );
   }
 
-  Future<bool> showRewarded() async {
-    final ad = _rewarded;
-    if (ad == null || _isShowingFullScreenAd) {
-      _loadRewarded();
-      return false;
+  Future<bool> ensureRewardedReady({
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
+    if (!_canRequestAds || _isShowingFullScreenAd) return false;
+    if (_rewarded != null) return true;
+
+    final pending = _rewardedLoadCompleter;
+    if (pending != null) {
+      try {
+        return await pending.future.timeout(timeout);
+      } on TimeoutException {
+        return false;
+      }
     }
 
+    final completer = Completer<bool>();
+    _rewardedLoadCompleter = completer;
+    _loadRewarded();
+    try {
+      return await completer.future.timeout(timeout);
+    } on TimeoutException {
+      if (identical(_rewardedLoadCompleter, completer)) {
+        _rewardedLoadCompleter = null;
+      }
+      return _rewarded != null;
+    }
+  }
+
+  Future<RewardedAdOutcome> showRewardedGate() async {
+    if (_isShowingFullScreenAd) return RewardedAdOutcome.unavailable;
+    final ready = await ensureRewardedReady();
+    if (!ready) return RewardedAdOutcome.unavailable;
+
+    final ad = _rewarded;
+    if (ad == null) return RewardedAdOutcome.unavailable;
+
     var earned = false;
+    var failed = false;
     final completer = Completer<void>();
     _isShowingFullScreenAd = true;
 
     ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (_) {
+        _lastFullScreenAdAt = DateTime.now();
+      },
       onAdDismissedFullScreenContent: (shownAd) {
         shownAd.dispose();
         _rewarded = null;
@@ -248,6 +305,7 @@ class AdsService {
         if (!completer.isCompleted) completer.complete();
       },
       onAdFailedToShowFullScreenContent: (shownAd, error) {
+        failed = true;
         shownAd.dispose();
         _rewarded = null;
         _isShowingFullScreenAd = false;
@@ -257,11 +315,19 @@ class AdsService {
     );
 
     ad.show(
-      onUserEarnedReward: (_, reward) => earned = true,
+      onUserEarnedReward: (_, reward) {
+        earned = true;
+        _lastFullScreenAdAt = DateTime.now();
+      },
     );
     await completer.future;
-    return earned;
+
+    if (failed) return RewardedAdOutcome.failed;
+    return earned ? RewardedAdOutcome.earned : RewardedAdOutcome.dismissed;
   }
+
+  Future<bool> showRewarded() async =>
+      (await showRewardedGate()) == RewardedAdOutcome.earned;
 
   void _loadAppOpen() {
     if (!_canRequestAds || _appOpenAd != null) return;
@@ -285,7 +351,7 @@ class AdsService {
 
   Future<void> showAppOpenIfEligible() async {
     // Google recommends waiting until users have used the app a few times.
-    if (!_appOpenEnabled || !_canRequestAds || _sessionCount < 3 || _isShowingFullScreenAd) return;
+    if (!_appOpenEnabled || !_canRequestAds || _sessionCount < 3 || _isShowingFullScreenAd || recentlyShowedFullScreenAd) return;
 
     final prefs = await SharedPreferences.getInstance();
     final lastMs = prefs.getInt(_lastAppOpenKey);
@@ -334,6 +400,7 @@ class AdsService {
     );
 
     ad.show();
+    _lastFullScreenAdAt = DateTime.now();
   }
 
   Future<void> dispose() async {
@@ -344,5 +411,10 @@ class AdsService {
     _interstitial = null;
     _rewarded = null;
     _appOpenAd = null;
+    final pending = _rewardedLoadCompleter;
+    if (pending != null && !pending.isCompleted) {
+      pending.complete(false);
+    }
+    _rewardedLoadCompleter = null;
   }
 }
