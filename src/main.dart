@@ -228,6 +228,15 @@ class _HomeScreenState extends State<HomeScreen> {
       createdAt: DateTime.now(),
     );
     await _store.add(record);
+
+    if (widget.autoSaveDownloads) {
+      try {
+        await _service.savePdfToDownloads(file);
+      } catch (_) {
+        // Keep the internal copy even if public Downloads export is unavailable.
+      }
+    }
+
     await _loadFiles();
   }
 
@@ -262,14 +271,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _scan() async {
-    final pages = await Navigator.of(context).push<List<Uint8List>>(
+    final pages = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(builder: (_) => const LiveScannerScreen()),
     );
     if (pages == null || pages.isEmpty) return;
 
     setState(() => _busy = true);
     try {
-      final output = await _service.createScannedPdf(pages);
+      final output = await _service.createScannedPdfFromFiles(pages);
       await _register(output);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -292,6 +301,12 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     } finally {
+      for (final path in pages) {
+        try {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
       if (mounted) setState(() => _busy = false);
     }
   }
