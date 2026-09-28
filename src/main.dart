@@ -439,3 +439,5 @@ class _ToolCard extends StatelessWidget {
 // Trigger full feature build
 
 // Trigger full feature build after test cleanup
+
+// Trigger stable signed ARM64 beta build
