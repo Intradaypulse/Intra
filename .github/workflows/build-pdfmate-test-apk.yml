@@ -53,17 +53,12 @@ jobs:
 
       - name: Configure Android, branding and OCR models
         shell: bash
-        env:
-          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
         run: |
           python3 - <<'PY'
-          import os
           from pathlib import Path
 
-          app_id = os.environ.get(
-              "ADMOB_APP_ID",
-              "",
-          ).strip() or "ca-app-pub-3940256099942544~3347511713"
+          # Beta/RC builds are intentionally isolated from production AdMob.
+          app_id = "ca-app-pub-3940256099942544~3347511713"
 
           manifest = Path("buildapp/android/app/src/main/AndroidManifest.xml")
           s = manifest.read_text()
