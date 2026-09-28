@@ -21,6 +21,7 @@ import 'signature_placement_screen.dart';
 import 'ads_service.dart';
 import 'file_store.dart';
 import 'live_scanner_screen.dart';
+import 'lru_future_cache.dart';
 import 'pdf_service.dart';
 import 'pdf_viewer.dart';
 
@@ -197,7 +198,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<PdfRecord> _files = [];
   final Map<String, int> _fileSizes = {};
-  final Map<String, Future<Uint8List?>> _thumbnailFutures = {};
+  final LruFutureCache<String, Uint8List?> _thumbnailFutures =
+      LruFutureCache<String, Uint8List?>(capacity: 32);
   PdfSortMode _sortMode = PdfSortMode.newest;
   bool _favoritesOnly = false;
   bool _busy = false;
@@ -225,6 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _thumbnailFutures.clear();
     _banner?.dispose();
     _search.dispose();
     super.dispose();
@@ -244,9 +247,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }(),
     ]);
 
-    _thumbnailFutures.removeWhere(
-      (path, _) => !files.any((record) => record.path == path),
-    );
+    // The cache is bounded; clear entries when the document list changes so
+    // renamed/deleted PDFs cannot leave stale thumbnail data behind.
+    _thumbnailFutures.clear();
 
     if (mounted) {
       setState(() {
@@ -270,7 +273,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<Uint8List?> _thumbnail(String path) =>
-      _thumbnailFutures.putIfAbsent(path, () => _loadThumbnail(path));
+      _thumbnailFutures.getOrCreate(path, () => _loadThumbnail(path));
 
   String _formatFileSize(int bytes) {
     const kb = 1024;
