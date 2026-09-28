@@ -1416,17 +1416,122 @@ class PdfService {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
   }) async {
-    if (script == TextRecognitionScript.latin) {
-      return _makeLatinSearchablePdfPreservingOriginal(
-        source,
-        password: password,
-      );
+    final engine = Pdf();
+    PdfDoc? doc;
+    PdfEditor? editor;
+    final recognizer = TextRecognizer(script: script);
+    final output = await _newFile('Searchable');
+
+    try {
+      doc = await engine.open(FileSource(source), password: password);
+      editor = await engine.edit(FileSource(source), password: password);
+
+      for (var index = 0; index < doc.pageCount; index++) {
+        Uint8List? renderedBytes;
+        await for (final rendered in doc.render(
+          pages: PdfPages.single(index),
+          size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
+        )) {
+          renderedBytes = rendered.data;
+          break;
+        }
+
+        final pageBytes = renderedBytes;
+        if (pageBytes == null) continue;
+
+        final decoded = img.decodePng(pageBytes);
+        if (decoded == null) {
+          throw StateError('Could not decode rendered page ${index + 1}.');
+        }
+
+        final tempImage = await _newManagedTempFile(
+          'searchable_image_$index',
+          extension: 'png',
+        );
+        await tempImage.writeAsBytes(pageBytes, flush: true);
+
+        RecognizedText recognized;
+        try {
+          recognized = await recognizer.processImage(
+            InputImage.fromFilePath(tempImage.path),
+          );
+        } finally {
+          await secureDeleteTemporary(tempImage);
+        }
+
+        final info = doc.pages[index];
+
+        for (final block in recognized.blocks) {
+          for (final line in block.lines) {
+            final parts = line.elements.isEmpty
+                ? <({String text, Rect box})>[
+                    (text: line.text, box: line.boundingBox),
+                  ]
+                : <({String text, Rect box})>[
+                    for (final element in line.elements)
+                      (text: element.text, box: element.boundingBox),
+                  ];
+
+            for (final part in parts) {
+              final text = part.text.trim();
+              if (text.isEmpty) continue;
+
+              final placement = mapOcrRectToPdf(
+                leftPx: part.box.left,
+                topPx: part.box.top,
+                widthPx: part.box.width,
+                heightPx: part.box.height,
+                imageWidthPx: decoded.width.toDouble(),
+                imageHeightPx: decoded.height.toDouble(),
+                pdfWidthPt: info.width,
+                pdfHeightPt: info.height,
+              );
+
+              if (placement.width <= 0 || placement.height <= 0) continue;
+
+              await editor.addWatermark(
+                index,
+                text,
+                style: PdfWatermarkStyle(
+                  fontSize: math.max(2, placement.height * 0.82),
+                  opacity: 0.001,
+                  rotation: line.angle ?? 0,
+                ),
+                position: PdfWatermarkPosition.exact(
+                  x: placement.left,
+                  y: placement.top,
+                  width: placement.width,
+                  height: placement.height,
+                ),
+                layer: PdfWatermarkLayer.background,
+              );
+            }
+          }
+        }
+      }
+
+      final sink = await FileSink.create(output);
+      try {
+        await editor.save(
+          sink,
+          options: const PdfSaveOptions.incremental(),
+        );
+        await sink.close();
+      } catch (_) {
+        await sink.close();
+        try {
+          await output.delete();
+        } catch (_) {}
+        rethrow;
+      }
+
+      return output;
+    } finally {
+      await recognizer.close();
+      await editor?.dispose();
+      await doc?.dispose();
+      await engine.dispose();
     }
-    return _makeUnicodeSearchablePdf(
-      source,
-      script: script,
-      password: password,
-    );
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
