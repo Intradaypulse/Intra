@@ -222,6 +222,10 @@ class AdsService {
   }
 
   Future<void> showPrivacyOptions() async {
+    // A changed privacy choice can still permit non-personalized ads. Always
+    // discard inventory requested under the old choice, even when UMP later
+    // returns canRequestAds=true again.
+    _clearAds();
     final completer = Completer<void>();
     ConsentForm.showPrivacyOptionsForm((error) async {
       if (error != null) {
