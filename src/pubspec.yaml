@@ -18,6 +18,7 @@ dependencies:
   google_mobile_ads: ^9.1.0
   shared_preferences: ^2.5.3
   file_picker: ^13.1.0
+  file_saver: ^0.6.0
   pdf_manipulator: ^5.0.0
   pdfx: ^2.9.2
   document_scan: ^0.3.1
