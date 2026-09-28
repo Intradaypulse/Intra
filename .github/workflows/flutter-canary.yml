@@ -38,6 +38,7 @@ jobs:
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
+          cp -r src/assets buildapp/assets
           rm -f buildapp/test/widget_test.dart
           mkdir -p buildapp/test
           if [ -d test ]; then cp -r test/. buildapp/test/; fi
