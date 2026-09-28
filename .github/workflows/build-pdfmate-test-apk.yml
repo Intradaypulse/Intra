@@ -308,4 +308,16 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
-          script: cd buildapp && flutter test integration_test/app_smoke_test.dart -d emulator-5554
+          script: |
+            mkdir -p device-logs
+            adb logcat -c
+            cd buildapp && timeout 15m flutter test integration_test/app_smoke_test.dart -d emulator-5554 --reporter expanded > ../device-logs/flutter-test.log 2>&1; result=$?; cat ../device-logs/flutter-test.log; adb logcat -d -v threadtime > ../device-logs/logcat.txt; adb shell dumpsys activity activities > ../device-logs/activities.txt; exit $result
+
+      - name: Upload Android test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Android-test-diagnostics
+          path: device-logs/
+          if-no-files-found: ignore
+          retention-days: 7

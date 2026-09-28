@@ -520,18 +520,24 @@ class PdfService {
         size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
       )) {
         final decoded = img.decodePng(page.data);
-        if (decoded == null)
-          throw StateError('Could not decode page ${index + 1}.');
+        if (decoded == null) throw StateError('Could not decode page $pageNo.');
         final jpgBytes = img.encodeJpg(decoded, quality: 88);
         final dir = await _docs();
         final path =
             '${dir.path}/PDF_Page_${pageNo}_${DateTime.now().millisecondsSinceEpoch}.jpg';
         final file = File(path);
-        await file.writeAsBytes(jpgBytes, flush: true);
         outputs.add(file);
+        await file.writeAsBytes(jpgBytes, flush: true);
         pageNo++;
       }
       return outputs;
+    } catch (_) {
+      for (final output in outputs) {
+        try {
+          if (await output.exists()) await output.delete();
+        } catch (_) {}
+      }
+      rethrow;
     } finally {
       await doc?.dispose();
       await pdf.dispose();
@@ -709,6 +715,20 @@ class PdfService {
     final output = await _newFile('Organized');
     final engine = Pdf();
     try {
+      final count = await pageCount(source, password: password);
+      if (pageOrder.any((page) => page < 0 || page >= count)) {
+        throw RangeError('A selected page is outside the document.');
+      }
+      if (rotations.entries.any(
+        (entry) =>
+            entry.key < 0 ||
+            entry.key >= pageOrder.length ||
+            entry.value % 90 != 0,
+      )) {
+        throw ArgumentError(
+          'Page rotations must use valid output pages and multiples of 90 degrees.',
+        );
+      }
       final sink = await FileSink.create(work);
       try {
         await engine.extractPages(
@@ -1537,17 +1557,16 @@ class PdfService {
         size: PdfRenderSize(maxWidth: maxWidth, maxHeight: maxHeight),
       )) {
         final decoded = img.decodePng(page.data);
-        if (decoded == null)
-          throw StateError('Could not decode page ${index + 1}.');
+        if (decoded == null) throw StateError('Could not decode page $pageNo.');
         final file = await _newManagedTempFile(
           'jpg_page_$pageNo',
           extension: 'jpg',
         );
+        outputs.add(file);
         await file.writeAsBytes(
           img.encodeJpg(decoded, quality: 90),
           flush: true,
         );
-        outputs.add(file);
         pageNo++;
       }
       return outputs;
