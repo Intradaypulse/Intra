@@ -1415,121 +1415,18 @@ class PdfService {
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
-  }) async {
-    final engine = Pdf();
-    PdfDoc? doc;
-    PdfEditor? editor;
-    final recognizer = TextRecognizer(script: script);
-    final output = await _newFile('Searchable');
-
-    try {
-      doc = await engine.open(FileSource(source), password: password);
-      editor = await engine.edit(FileSource(source), password: password);
-
-      for (var index = 0; index < doc.pageCount; index++) {
-        Uint8List? renderedBytes;
-        await for (final rendered in doc.render(
-          pages: PdfPages.single(index),
-          size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
-        )) {
-          renderedBytes = rendered.data;
-          break;
-        }
-        final pageBytes = renderedBytes;
-        if (pageBytes == null) continue;
-
-        final decoded = img.decodePng(pageBytes);
-        if (decoded == null) {
-          throw StateError('Could not decode rendered page ${index + 1}.');
-        }
-
-        final tempImage = await _newManagedTempFile(
-          'searchable_image_$index',
-          extension: 'png',
-        );
-        await tempImage.writeAsBytes(pageBytes, flush: true);
-
-        RecognizedText recognized;
-        try {
-          recognized = await recognizer.processImage(
-            InputImage.fromFilePath(tempImage.path),
-          );
-        } finally {
-          await secureDeleteTemporary(tempImage);
-        }
-
-        final info = doc.pages[index];
-        for (final block in recognized.blocks) {
-          for (final line in block.lines) {
-            final elements = line.elements.isEmpty ? [null] : line.elements;
-
-            for (final element in elements) {
-              final text = (element?.text ?? line.text).trim();
-              if (text.isEmpty) continue;
-
-              final bounds = element?.boundingBox ?? line.boundingBox;
-              final angleDegrees = element?.angle ?? line.angle ?? 0;
-
-              final placement = mapOcrRectToPdf(
-                leftPx: bounds.left,
-                topPx: bounds.top,
-                widthPx: bounds.width,
-                heightPx: bounds.height,
-                imageWidthPx: decoded.width.toDouble(),
-                imageHeightPx: decoded.height.toDouble(),
-                pdfWidthPt: info.width,
-                pdfHeightPt: info.height,
-              );
-              if (placement.width <= 0 || placement.height <= 0) continue;
-
-              final pdfY = math.max(
-                0,
-                info.height - placement.top - placement.height,
-              );
-
-              await editor.addWatermark(
-                index,
-                text,
-                style: PdfWatermarkStyle(
-                  opacity: 0,
-                  fontSize: math.max(2, placement.height * 0.82),
-                  rotation: angleDegrees,
-                ),
-                position: PdfWatermarkPosition.exact(
-                  x: placement.left,
-                  y: pdfY,
-                  width: placement.width,
-                  height: placement.height,
-                ),
-                layer: PdfWatermarkLayer.background,
-              );
-            }
-          }
-        }
-      }
-
-      final sink = await FileSink.create(output);
-      try {
-        await editor.save(
-          sink,
-          options: const PdfSaveOptions.incremental(),
-        );
-        await sink.close();
-      } catch (_) {
-        await sink.close();
-        try {
-          await output.delete();
-        } catch (_) {}
-        rethrow;
-      }
-
-      return output;
-    } finally {
-      await recognizer.close();
-      await editor?.dispose();
-      await doc?.dispose();
-      await engine.dispose();
+  }) {
+    if (script == TextRecognitionScript.latin) {
+      return _makeLatinSearchablePdfPreservingOriginal(
+        source,
+        password: password,
+      );
     }
+    return _makeUnicodeSearchablePdf(
+      source,
+      script: script,
+      password: password,
+    );
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
