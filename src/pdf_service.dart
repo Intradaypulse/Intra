@@ -1023,7 +1023,7 @@ class PdfService {
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(source), password: password);
-      return (await doc.getSignatures()).isNotEmpty;
+      return (await doc.signatures).isNotEmpty;
     } finally {
       await doc?.dispose();
       await pdf.dispose();
@@ -1461,51 +1461,7 @@ class PdfService {
   Future<String> saveJpgToGallery(File source) async {
     final rawName = source.uri.pathSegments.last;
     final name = rawName.replaceFirst(
-      RegExp(r'\.(jpg|jpeg)
-
-
-  Future<List<File>> pdfToJpgFromFile(
-    File source, {
-    String? password,
-    int maxWidth = 2200,
-    int maxHeight = 3100,
-  }) async {
-    final pdf = Pdf();
-    PdfDoc? doc;
-    final outputs = <File>[];
-    final dir = await _tmp();
-
-    try {
-      doc = await pdf.open(FileSource(source), password: password);
-      var pageNo = 1;
-      await for (final page in doc.render(
-        pages: const PdfPages.all(),
-        size: PdfRenderSize(
-          maxWidth: maxWidth,
-          maxHeight: maxHeight,
-        ),
-      )) {
-        final decoded = img.decodePng(page.data);
-        if (decoded == null) continue;
-        final file = File(
-          '${dir.path}/PDFMate_Page_${pageNo}_${DateTime.now().microsecondsSinceEpoch}.jpg',
-        );
-        await file.writeAsBytes(
-          img.encodeJpg(decoded, quality: 90),
-          flush: true,
-        );
-        outputs.add(file);
-        pageNo++;
-      }
-      return outputs;
-    } finally {
-      await doc?.dispose();
-      await pdf.dispose();
-    }
-  }
-
-}
-, caseSensitive: false),
+      RegExp(r'\.(jpg|jpeg)$', caseSensitive: false),
       '',
     );
     final result = await FileSaver.instance.saveToGallery(
@@ -1525,7 +1481,6 @@ class PdfService {
     return result;
   }
 
-
   Future<List<File>> pdfToJpgFromFile(
     File source, {
     String? password,
@@ -1535,7 +1490,6 @@ class PdfService {
     final pdf = Pdf();
     PdfDoc? doc;
     final outputs = <File>[];
-    final dir = await _tmp();
 
     try {
       doc = await pdf.open(FileSource(source), password: password);
@@ -1549,8 +1503,9 @@ class PdfService {
       )) {
         final decoded = img.decodePng(page.data);
         if (decoded == null) continue;
-        final file = File(
-          '${dir.path}/PDFMate_Page_${pageNo}_${DateTime.now().microsecondsSinceEpoch}.jpg',
+        final file = await _newManagedTempFile(
+          'jpg_page_$pageNo',
+          extension: 'jpg',
         );
         await file.writeAsBytes(
           img.encodeJpg(decoded, quality: 90),
@@ -1560,10 +1515,14 @@ class PdfService {
         pageNo++;
       }
       return outputs;
+    } catch (_) {
+      for (final file in outputs) {
+        await secureDeleteTemporary(file);
+      }
+      rethrow;
     } finally {
       await doc?.dispose();
       await pdf.dispose();
     }
   }
-
 }
