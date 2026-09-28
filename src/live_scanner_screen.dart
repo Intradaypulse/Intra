@@ -235,11 +235,12 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     try {
       await _pauseStream();
       final photo = await controller.takePicture();
-      capturedPhotoPath = photo.path;
-      _tempSession.own(capturedPhotoPath);
+      final capturedPath = photo.path;
+      capturedPhotoPath = capturedPath;
+      _tempSession.own(capturedPath);
 
       final detected = await _detector.detect(
-        ScanInput.file(capturedPhotoPath!),
+        ScanInput.file(capturedPath),
         sensitivity: DetectionSensitivity.lenient,
       );
 
@@ -247,7 +248,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       final result = await Navigator.of(context).push<ManualCropResult>(
         MaterialPageRoute(
           builder: (_) => ManualCropScreen(
-            imagePath: capturedPhotoPath!,
+            imagePath: capturedPath,
             initialCorners: detected,
           ),
         ),
@@ -450,9 +451,8 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.all(8),
                       itemCount: _pages.length,
-                      onReorder: (oldIndex, newIndex) {
+                      onReorderItem: (oldIndex, newIndex) {
                         setState(() {
-                          if (newIndex > oldIndex) newIndex--;
                           final page = _pages.removeAt(oldIndex);
                           _pages.insert(newIndex, page);
                         });
