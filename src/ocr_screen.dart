@@ -67,8 +67,9 @@ class _OcrScreenState extends State<OcrScreen> {
   }
 
   Future<void> _pick() async {
-    var file = await widget.service.pickPdfFile();
-    if (file == null) return;
+    final picked = await widget.service.pickPdfFile();
+    if (picked == null) return;
+    var file = picked;
 
     setState(() {
       _busy = true;
