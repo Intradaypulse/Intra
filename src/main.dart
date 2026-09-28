@@ -2,17 +2,22 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'ads_service.dart';
 import 'file_store.dart';
+import 'live_scanner_screen.dart';
 import 'pdf_service.dart';
 import 'pdf_viewer.dart';
 import 'signature_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
   runApp(const PDFMateApp());
 }
 
@@ -133,75 +138,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _scan() async {
-    final filter = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text('Scan style'),
-              subtitle: Text('Auto-crop and perspective correction are applied.'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.auto_awesome_rounded),
-              title: const Text('Enhance'),
-              onTap: () => Navigator.pop(context, 'enhance'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.contrast_rounded),
-              title: const Text('Black & white'),
-              onTap: () => Navigator.pop(context, 'blackWhite'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.auto_fix_high_rounded),
-              title: const Text('Magic color'),
-              onTap: () => Navigator.pop(context, 'magicColor'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.palette_outlined),
-              title: const Text('Original color'),
-              onTap: () => Navigator.pop(context, 'none'),
-            ),
-          ],
-        ),
-      ),
+    final pages = await Navigator.of(context).push<List<Uint8List>>(
+      MaterialPageRoute(builder: (_) => const LiveScannerScreen()),
     );
-    if (filter == null) return;
+    if (pages == null || pages.isEmpty) return;
 
-    final pages = <Uint8List>[];
     setState(() => _busy = true);
     try {
-      while (true) {
-        final page = await _service.captureScannedPage(filter: filter);
-        if (page == null) break;
-        pages.add(page);
-        if (!mounted) return;
-        setState(() => _busy = false);
-        final addMore = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text('Page ${pages.length} captured'),
-            content: const Text('Add another page to this PDF?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Finish'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Add page'),
-              ),
-            ],
-          ),
-        );
-        if (addMore != true) break;
-        if (mounted) setState(() => _busy = true);
-      }
-
-      if (pages.isEmpty) return;
-      if (mounted) setState(() => _busy = true);
       final output = await _service.createScannedPdf(pages);
       await _register(output);
       if (!mounted) return;
@@ -210,10 +153,14 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Text('Saved ${pages.length}-page scan'),
           action: SnackBarAction(
             label: 'Open',
-            onPressed: () => _openPath(output.path, output.uri.pathSegments.last),
+            onPressed: () => _openPath(
+              output.path,
+              output.uri.pathSegments.last,
+            ),
           ),
         ),
       );
+      await AdsService.instance.recordCompletedOperation();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
