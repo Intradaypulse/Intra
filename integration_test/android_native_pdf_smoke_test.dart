@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:integration_test/integration_test.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdfmate/pdf_service.dart';
 
@@ -55,6 +56,15 @@ void main() {
       expect(parts, hasLength(2));
       expect(await service.pageCount(parts[0]), 2);
       expect(await service.pageCount(parts[1]), 2);
+
+      final downloadsResult = await service.savePdfToDownloads(source);
+      expect(downloadsResult, isNotEmpty);
+
+      final jpg = File('${temp.path}/storage-smoke.jpg');
+      final image = img.Image(width: 24, height: 24);
+      await jpg.writeAsBytes(img.encodeJpg(image), flush: true);
+      final galleryResult = await service.saveJpgToGallery(jpg);
+      expect(galleryResult, isNotEmpty);
 
       await service.cleanupStaleTemporaryFiles();
       final leftovers = await temp
