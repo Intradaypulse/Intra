@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 
+import 'ads_service.dart';
 import 'pdf_service.dart';
 
 class OcrScreen extends StatefulWidget {
@@ -20,6 +21,8 @@ class _OcrScreenState extends State<OcrScreen> {
   File? _source;
   TextRecognitionScript _script = TextRecognitionScript.latin;
   bool _busy = false;
+  int _pageCount = 0;
+  bool _heavyUnlocked = false;
   String _status = 'Choose a PDF to OCR.';
   String? _extractedText;
 
@@ -80,6 +83,8 @@ class _OcrScreenState extends State<OcrScreen> {
           if (!mounted) return;
           setState(() {
             _source = file;
+            _pageCount = count;
+            _heavyUnlocked = count <= 10;
             _status = '$count page(s) ready for OCR.';
           });
           break;
@@ -109,9 +114,57 @@ class _OcrScreenState extends State<OcrScreen> {
     }
   }
 
+
+  Future<bool> _ensureLargeOcrUnlocked() async {
+    if (_pageCount <= 10 || _heavyUnlocked) return true;
+
+    // If no rewarded ad is currently loaded, don't make the document tool
+    // unusable; continue and preload for the next heavy task.
+    if (!AdsService.instance.rewardedAvailable) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Rewarded ad is not ready — processing this large PDF without an ad.',
+            ),
+          ),
+        );
+      }
+      return true;
+    }
+
+    final watch = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Large OCR job'),
+        content: Text(
+          'This PDF has $_pageCount pages. Watch one rewarded ad to unlock the full OCR/searchable-PDF job.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Not now'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.play_circle_outline),
+            label: const Text('Watch ad'),
+          ),
+        ],
+      ),
+    );
+
+    if (watch != true) return false;
+    final earned = await AdsService.instance.showRewarded();
+    if (!earned) return false;
+    _heavyUnlocked = true;
+    return true;
+  }
+
   Future<void> _extract() async {
     final source = _source;
     if (source == null) return;
+    if (!await _ensureLargeOcrUnlocked()) return;
 
     setState(() {
       _busy = true;
@@ -149,6 +202,7 @@ class _OcrScreenState extends State<OcrScreen> {
   Future<void> _makeSearchable() async {
     final source = _source;
     if (source == null) return;
+    if (!await _ensureLargeOcrUnlocked()) return;
 
     setState(() {
       _busy = true;
