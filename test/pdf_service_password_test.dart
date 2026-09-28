@@ -152,4 +152,53 @@ void main() {
     }
   });
 
+
+  test('native PDF editor preserves Unicode OCR text in incremental save',
+      () async {
+    final source = await createThreePagePdf();
+    final engine = Pdf();
+    final editor = await engine.edit(FileSource(source));
+    final output = File('${docs.path}/unicode_overlay.pdf');
+    final sink = await FileSink.create(output);
+    try {
+      await editor.addWatermark(
+        0,
+        'नमस्ते 世界 日本語 한국어',
+        style: const PdfWatermarkStyle(
+          opacity: 0.001,
+          fontSize: 12,
+          rotation: 0,
+        ),
+        position: const PdfWatermarkPosition.exact(
+          x: 40,
+          y: 40,
+          width: 300,
+          height: 24,
+        ),
+        layer: PdfWatermarkLayer.background,
+      );
+      await editor.save(
+        sink,
+        options: const PdfSaveOptions.incremental(),
+      );
+      await sink.close();
+    } finally {
+      await editor.dispose();
+      await engine.dispose();
+    }
+
+    final reader = Pdf();
+    PdfDoc? doc;
+    try {
+      doc = await reader.open(FileSource(output));
+      final text = await doc.extract(pages: const PdfPages.single(0));
+      expect(text, contains('नमस्ते'));
+      expect(text, contains('世界'));
+      expect(text, contains('日本語'));
+      expect(text, contains('한국어'));
+    } finally {
+      await doc?.dispose();
+      await reader.dispose();
+    }
+  });
 }
