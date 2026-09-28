@@ -26,6 +26,7 @@ class _OcrScreenState extends State<OcrScreen> {
   bool _busy = false;
   int _pageCount = 0;
   bool _heavyUnlocked = false;
+  bool _hasDigitalSignatures = false;
   String _status = 'Choose a PDF to OCR.';
   String? _extractedText;
 
@@ -89,11 +90,18 @@ class _OcrScreenState extends State<OcrScreen> {
         try {
           final count = await widget.service.pageCount(file);
           if (!mounted) return;
+          final signed =
+              await widget.service.hasDigitalSignatures(file);
+          if (!mounted) return;
           setState(() {
             _source = file;
             _pageCount = count;
-            _heavyUnlocked = count <= TelemetryService.instance.rewardedOcrThresholdPages;
-            _status = '$count page(s) ready for OCR.';
+            _heavyUnlocked =
+                count <= TelemetryService.instance.rewardedOcrThresholdPages;
+            _hasDigitalSignatures = signed;
+            _status = signed
+                ? '$count page(s) • digitally signed document'
+                : '$count page(s) ready for OCR.';
           });
           break;
         } on PdfPasswordRequired {
@@ -217,6 +225,7 @@ class _OcrScreenState extends State<OcrScreen> {
     final source = _source;
     if (source == null) return;
     if (!await _ensureLargeOcrUnlocked()) return;
+    if (!await _confirmSignedPdfModification()) return;
 
     setState(() {
       _busy = true;
@@ -249,6 +258,33 @@ class _OcrScreenState extends State<OcrScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<bool> _confirmSignedPdfModification() async {
+    if (!_hasDigitalSignatures) return true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Digitally signed PDF'),
+        content: const Text(
+          'Adding an OCR text layer changes the document. Existing digital '
+          'signatures may show the file as modified after signing. '
+          'PDFMate will not silently claim that the original signature '
+          'remains valid. Continue with a new searchable copy?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Create copy'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   Future<void> _makeSearchable() async {
@@ -332,9 +368,18 @@ class _OcrScreenState extends State<OcrScreen> {
                     },
             ),
             const SizedBox(height: 10),
-            const Text(
-              'All recognition runs on-device. Choose the script matching the document for best accuracy.',
+            Text(
+              _script == TextRecognitionScript.latin
+                  ? 'Recognition runs on-device. Latin searchable PDFs preserve the original PDF and add a word-level OCR layer.'
+                  : 'Recognition runs on-device. Unicode searchable PDFs use a script-specific Noto font; the font may be downloaded and cached once on first use.',
             ),
+            if (_hasDigitalSignatures) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'This file has digital signatures. Creating a modified OCR copy can change signature validation status.',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
             const SizedBox(height: 18),
             Row(
               children: [
