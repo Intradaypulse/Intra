@@ -7,6 +7,7 @@ import 'package:pdf_manipulator/io.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdfx/pdfx.dart';
 
+import 'lru_future_cache.dart';
 import 'pdf_service.dart';
 
 class PdfViewerScreen extends StatefulWidget {
@@ -29,7 +30,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   PdfControllerPinch? _controller;
   String? _workingPath;
   File? _temporaryDecrypted;
-  List<Uint8List> _thumbs = [];
+  final LruFutureCache<int, Uint8List?> _thumbCache =
+      LruFutureCache<int, Uint8List?>(capacity: 24);
 
   int _page = 1;
   int _pages = 0;
@@ -116,7 +118,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         }
       }
 
-      final thumbs = await _service.renderThumbnails(source, width: 130);
       if (!mounted) return;
 
       final controller = PdfControllerPinch(
@@ -125,7 +126,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
       setState(() {
         _workingPath = source.path;
-        _thumbs = thumbs;
         _controller = controller;
         _busy = false;
       });
@@ -137,6 +137,19 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         });
       }
     }
+  }
+
+  Future<Uint8List?> _thumbnailFor(int index) {
+    final path = _workingPath;
+    if (path == null) return Future<Uint8List?>.value(null);
+    return _thumbCache.getOrCreate(
+      index,
+      () => _service.renderPage(
+        File(path),
+        index,
+        width: 130,
+      ),
+    );
   }
 
   Future<void> _jumpToPage() async {
@@ -274,6 +287,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   void dispose() {
     _controller?.dispose();
+    _thumbCache.clear();
     unawaited(_service.secureDeleteTemporary(_temporaryDecrypted));
     super.dispose();
   }
@@ -302,7 +316,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           ),
           IconButton(
             tooltip: 'Page thumbnails',
-            onPressed: _thumbs.isEmpty
+            onPressed: _pages <= 0
                 ? null
                 : () => setState(() => _showThumbs = !_showThumbs),
             icon: Icon(
@@ -339,7 +353,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 8,
                                     ),
-                                    itemCount: _thumbs.length,
+                                    itemCount: _pages,
                                     itemBuilder: (context, index) {
                                       final selected = index + 1 == _page;
                                       return GestureDetector(
@@ -366,9 +380,31 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                           ),
                                           child: Column(
                                             children: [
-                                              Image.memory(
-                                                _thumbs[index],
-                                                fit: BoxFit.contain,
+                                              FutureBuilder<Uint8List?>(
+                                                future: _thumbnailFor(index),
+                                                builder: (context, snapshot) {
+                                                  final bytes = snapshot.data;
+                                                  if (bytes == null) {
+                                                    return const SizedBox(
+                                                      height: 96,
+                                                      child: Center(
+                                                        child: SizedBox(
+                                                          width: 18,
+                                                          height: 18,
+                                                          child:
+                                                              CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }
+                                                  return Image.memory(
+                                                    bytes,
+                                                    fit: BoxFit.contain,
+                                                    gaplessPlayback: true,
+                                                  );
+                                                },
                                               ),
                                               Text(
                                                 '${index + 1}',
