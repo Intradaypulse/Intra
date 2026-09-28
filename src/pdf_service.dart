@@ -791,4 +791,28 @@ class PdfService {
     }
   }
 
+
+  Future<Uint8List?> renderPage(
+    File source,
+    int pageIndex, {
+    String? password,
+    int width = 1200,
+  }) async {
+    final pdf = Pdf();
+    PdfDoc? doc;
+    try {
+      doc = await pdf.open(FileSource(source), password: password);
+      await for (final page in doc.render(
+        pages: PdfPages.single(pageIndex),
+        size: PdfRenderSize.thumbnail(width),
+      )) {
+        return page.data;
+      }
+      return null;
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
 }
