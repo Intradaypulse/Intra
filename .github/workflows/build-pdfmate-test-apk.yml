@@ -98,7 +98,7 @@ jobs:
           )
           g = g.replace(
               "minSdk = flutter.minSdkVersion",
-              "minSdk = 23",
+              "minSdk = 24",
           )
           g = g.replace(
               "targetSdk = flutter.targetSdkVersion",
