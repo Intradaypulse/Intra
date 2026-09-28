@@ -1464,23 +1464,21 @@ class PdfService {
         for (final block in recognized.blocks) {
           for (final line in block.lines) {
             final parts = line.elements.isEmpty
-                ? <({String text, Rect box})>[
-                    (text: line.text, box: line.boundingBox),
-                  ]
-                : <({String text, Rect box})>[
+                ? [(line.text, line.boundingBox)]
+                : [
                     for (final element in line.elements)
-                      (text: element.text, box: element.boundingBox),
+                      (element.text, element.boundingBox),
                   ];
 
             for (final part in parts) {
-              final text = part.text.trim();
+              final text = part.$1.trim();
               if (text.isEmpty) continue;
 
               final placement = mapOcrRectToPdf(
-                leftPx: part.box.left,
-                topPx: part.box.top,
-                widthPx: part.box.width,
-                heightPx: part.box.height,
+                leftPx: part.$2.left,
+                topPx: part.$2.top,
+                widthPx: part.$2.width,
+                heightPx: part.$2.height,
                 imageWidthPx: decoded.width.toDouble(),
                 imageHeightPx: decoded.height.toDouble(),
                 pdfWidthPt: info.width,
