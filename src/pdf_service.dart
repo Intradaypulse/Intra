@@ -11,6 +11,28 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 
+enum CompressionPreset { highQuality, balanced, smallest }
+
+class CompressionResult {
+  const CompressionResult({
+    required this.file,
+    required this.originalBytes,
+    required this.outputBytes,
+  });
+
+  final File file;
+  final int originalBytes;
+  final int outputBytes;
+
+  int get savedBytes => originalBytes - outputBytes;
+
+  double get savedPercent => originalBytes <= 0
+      ? 0
+      : ((originalBytes - outputBytes) / originalBytes * 100)
+          .clamp(-999, 100)
+          .toDouble();
+}
+
 class PdfService {
   PdfService();
 
@@ -405,6 +427,287 @@ class PdfService {
     } finally {
       await pdf.dispose();
     }
+  }
+
+
+  Future<File?> pickPdfFile() async {
+    final picked = await pickPdf();
+    if (picked == null) return null;
+    return _materialize(picked);
+  }
+
+  Future<List<File>> pickPdfFiles() async {
+    final picked = await pickPdfs();
+    final files = <File>[];
+    for (final item in picked) {
+      files.add(await _materialize(item));
+    }
+    return files;
+  }
+
+  Future<int> pageCount(File source, {String? password}) async {
+    final pdf = Pdf();
+    PdfDoc? doc;
+    try {
+      doc = await pdf.open(FileSource(source), password: password);
+      return doc.pageCount;
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+  Future<List<Uint8List>> renderThumbnails(
+    File source, {
+    String? password,
+    int width = 240,
+  }) async {
+    final pdf = Pdf();
+    PdfDoc? doc;
+    final result = <Uint8List>[];
+    try {
+      doc = await pdf.open(FileSource(source), password: password);
+      await for (final page in doc.render(
+        pages: const PdfPages.all(),
+        size: PdfRenderSize.thumbnail(width),
+      )) {
+        result.add(page.data);
+      }
+      return result;
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+  Future<CompressionResult> compressAdvanced(
+    File source,
+    CompressionPreset preset,
+  ) async {
+    final output = await _newFile('Compressed');
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    final originalBytes = await source.length();
+    try {
+      final policy = switch (preset) {
+        CompressionPreset.highQuality => PdfImagePolicy.print,
+        CompressionPreset.balanced => PdfImagePolicy.ebook,
+        CompressionPreset.smallest => PdfImagePolicy.screen,
+      };
+      await pdf.compress(
+        FileSource(source),
+        sink,
+        images: policy,
+      );
+      await sink.close();
+      return CompressionResult(
+        file: output,
+        originalBytes: originalBytes,
+        outputBytes: await output.length(),
+      );
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<File> mergeFiles(List<File> inputs) async {
+    if (inputs.length < 2) {
+      throw ArgumentError('Select at least two PDF files.');
+    }
+    final output = await _newFile('Merged');
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    try {
+      await pdf.merge(
+        inputs.map<DataSource>((file) => FileSource(file)).toList(),
+        sink,
+      );
+      await sink.close();
+      return output;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<File> organizePdf(
+    File source, {
+    required List<int> pageOrder,
+    required Map<int, int> rotations,
+    String? password,
+  }) async {
+    if (pageOrder.isEmpty) {
+      throw ArgumentError('At least one page must remain.');
+    }
+
+    final extracted = await _newFile('Organized_Work');
+    final pdf1 = Pdf();
+    final sink1 = await FileSink.create(extracted);
+    try {
+      await pdf1.extractPages(
+        FileSource(source),
+        sink1,
+        pages: pageOrder,
+        password: password,
+      );
+      await sink1.close();
+    } catch (_) {
+      await sink1.close();
+      rethrow;
+    } finally {
+      await pdf1.dispose();
+    }
+
+    final normalizedRotations = <int, int>{
+      for (final entry in rotations.entries)
+        if (entry.value % 360 != 0) entry.key: entry.value,
+    };
+
+    if (normalizedRotations.isEmpty) return extracted;
+
+    final output = await _newFile('Organized');
+    final pdf2 = Pdf();
+    final sink2 = await FileSink.create(output);
+    try {
+      await pdf2.rotatePages(
+        FileSource(extracted),
+        sink2,
+        pages: normalizedRotations,
+      );
+      await sink2.close();
+      try {
+        await extracted.delete();
+      } catch (_) {}
+      return output;
+    } catch (_) {
+      await sink2.close();
+      rethrow;
+    } finally {
+      await pdf2.dispose();
+    }
+  }
+
+  Future<List<File>> splitRanges(
+    File source,
+    List<List<int>> ranges, {
+    String? password,
+  }) async {
+    final outputs = <File>[];
+    for (var i = 0; i < ranges.length; i++) {
+      final pages = ranges[i];
+      if (pages.isEmpty) continue;
+      final output = await _newFile('Split_Range_${i + 1}');
+      final pdf = Pdf();
+      final sink = await FileSink.create(output);
+      try {
+        await pdf.extractPages(
+          FileSource(source),
+          sink,
+          pages: pages,
+          password: password,
+        );
+        await sink.close();
+        outputs.add(output);
+      } catch (_) {
+        await sink.close();
+        rethrow;
+      } finally {
+        await pdf.dispose();
+      }
+    }
+    return outputs;
+  }
+
+  Future<File> unlockPdf(File source, String password) async {
+    final output = await _newFile('Unlocked');
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    try {
+      await pdf.decrypt(
+        FileSource(source),
+        sink,
+        password: password,
+      );
+      await sink.close();
+      return output;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<File> protectPdfAdvanced(
+    File source, {
+    required String ownerPassword,
+    String userPassword = '',
+    bool readOnly = false,
+  }) async {
+    final output = await _newFile('Protected');
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    try {
+      await pdf.encrypt(
+        FileSource(source),
+        sink,
+        encryption: PdfEncryptionConfig(
+          ownerPassword: ownerPassword,
+          userPassword: userPassword,
+          algorithm: PdfEncryptionAlgorithm.aes256,
+          permissions: readOnly
+              ? const PdfPermissions.readOnly()
+              : const PdfPermissions.all(),
+        ),
+      );
+      await sink.close();
+      return output;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<File> stampSignatureAt(
+    File source,
+    Uint8List signaturePng, {
+    required int page,
+    required PdfRect rect,
+  }) async {
+    final output = await _newFile('Signed');
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    try {
+      await pdf.addImageStamp(
+        FileSource(source),
+        sink,
+        page: page,
+        imageData: MemorySource(signaturePng),
+        rect: rect,
+      );
+      await sink.close();
+      return output;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<PdfDoc> openPdfDoc(
+    Pdf pdf,
+    File source, {
+    String? password,
+  }) {
+    return pdf.open(FileSource(source), password: password);
   }
 
 }
