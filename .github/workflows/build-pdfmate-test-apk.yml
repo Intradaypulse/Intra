@@ -43,6 +43,7 @@ jobs:
           tar -xzf /tmp/pdfmate-core.tar.gz -C buildapp
           cd buildapp
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate .
+          rm -f test/widget_test.dart
 
       - name: Configure Android manifest
         shell: bash
