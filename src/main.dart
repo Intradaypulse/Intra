@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -7,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import 'file_store.dart';
 import 'pdf_service.dart';
 import 'pdf_viewer.dart';
+import 'signature_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -237,6 +239,168 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+
+  Future<void> _pdfToJpg() async {
+    setState(() => _busy = true);
+    try {
+      final outputs = await _service.pdfToJpg();
+      if (!mounted || outputs.isEmpty) return;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: outputs.map((e) => XFile(e.path)).toList(),
+          text: 'PDF pages exported by PDFMate',
+        ),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Exported ${outputs.length} JPG images')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF to JPG failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _extractPdfText() async {
+    setState(() => _busy = true);
+    try {
+      final text = await _service.extractPdfText();
+      if (!mounted || text == null) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('PDF text'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text.trim().isEmpty ? 'No embedded text found.' : text,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Text extraction failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deletePages() async {
+    final controller = TextEditingController();
+    final raw = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete pages'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.text,
+          decoration: const InputDecoration(
+            labelText: 'Page numbers',
+            hintText: 'Example: 2,4,5',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (raw == null || raw.trim().isEmpty) return;
+    final pages = raw
+        .split(',')
+        .map((e) => int.tryParse(e.trim()))
+        .whereType<int>()
+        .where((e) => e > 0)
+        .map((e) => e - 1)
+        .toSet()
+        .toList()
+      ..sort();
+    if (pages.isEmpty) return;
+    await _runFileTask(
+      'Delete pages',
+      () => _service.deletePdfPages(pages),
+    );
+  }
+
+  Future<void> _reorderPages() async {
+    final controller = TextEditingController();
+    final raw = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reorder pages'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'New page order',
+            hintText: 'Example: 3,1,2',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (raw == null || raw.trim().isEmpty) return;
+    final order = raw
+        .split(',')
+        .map((e) => int.tryParse(e.trim()))
+        .whereType<int>()
+        .where((e) => e > 0)
+        .map((e) => e - 1)
+        .toList();
+    if (order.isEmpty) return;
+    await _runFileTask(
+      'Reorder pages',
+      () => _service.reorderPdfPages(order),
+    );
+  }
+
+  Future<void> _signPdf() async {
+    final Uint8List? signature = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(builder: (_) => const SignatureScreen()),
+    );
+    if (signature == null) return;
+    await _runFileTask(
+      'Signature',
+      () => _service.addSignature(signature),
+    );
+  }
+
   void _open(PdfRecord record) => _openPath(record.path, record.name);
 
   void _openPath(String path, String title) {
@@ -450,6 +614,31 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.text_snippet_outlined,
                         title: 'OCR image',
                         onTap: _busy ? null : _ocr,
+                      ),
+                      _ToolCard(
+                        icon: Icons.text_fields_rounded,
+                        title: 'Extract PDF text',
+                        onTap: _busy ? null : _extractPdfText,
+                      ),
+                      _ToolCard(
+                        icon: Icons.photo_library_outlined,
+                        title: 'PDF to JPG',
+                        onTap: _busy ? null : _pdfToJpg,
+                      ),
+                      _ToolCard(
+                        icon: Icons.delete_outline_rounded,
+                        title: 'Delete pages',
+                        onTap: _busy ? null : _deletePages,
+                      ),
+                      _ToolCard(
+                        icon: Icons.reorder_rounded,
+                        title: 'Reorder pages',
+                        onTap: _busy ? null : _reorderPages,
+                      ),
+                      _ToolCard(
+                        icon: Icons.draw_rounded,
+                        title: 'Sign PDF',
+                        onTap: _busy ? null : _signPdf,
                       ),
                       _ToolCard(
                         icon: Icons.visibility_rounded,
