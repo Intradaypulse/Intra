@@ -46,21 +46,23 @@ class SettingsScreen extends StatelessWidget {
                   context: context,
                   showDragHandle: true,
                   builder: (context) => SafeArea(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (final mode in ThemeMode.values)
-                          RadioListTile<ThemeMode>(
-                            value: mode,
-                            groupValue: themeMode,
-                            title: Text(_themeLabel(mode)),
-                            onChanged: (selected) {
-                              if (selected != null) {
-                                Navigator.pop(context, selected);
-                              }
-                            },
-                          ),
-                      ],
+                    child: RadioGroup<ThemeMode>(
+                      groupValue: themeMode,
+                      onChanged: (selected) {
+                        if (selected != null) {
+                          Navigator.pop(context, selected);
+                        }
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final mode in ThemeMode.values)
+                            RadioListTile<ThemeMode>(
+                              value: mode,
+                              title: Text(_themeLabel(mode)),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 );
