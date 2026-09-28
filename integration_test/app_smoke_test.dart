@@ -32,3 +32,5 @@ void main() {
     expect(find.text('Settings'), findsOneWidget);
   });
 }
+
+// CI trigger: run emulator smoke coverage with the latest workflow.
