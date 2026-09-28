@@ -6,6 +6,17 @@ import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'advanced_merge_screen.dart';
+import 'advanced_split_screen.dart';
+import 'compression_screen.dart';
+import 'ocr_screen.dart';
+import 'onboarding_screen.dart';
+import 'page_organizer_screen.dart';
+import 'pdf_to_jpg_screen.dart';
+import 'security_screen.dart';
+import 'settings_screen.dart';
+import 'settings_store.dart';
+import 'signature_placement_screen.dart';
 import 'ads_service.dart';
 import 'file_store.dart';
 import 'live_scanner_screen.dart';
@@ -21,8 +32,56 @@ Future<void> main() async {
   runApp(const PDFMateApp());
 }
 
-class PDFMateApp extends StatelessWidget {
+class PDFMateApp extends StatefulWidget {
   const PDFMateApp({super.key});
+
+  @override
+  State<PDFMateApp> createState() => _PDFMateAppState();
+}
+
+class _PDFMateAppState extends State<PDFMateApp> {
+  final AppSettingsStore _settings = AppSettingsStore();
+
+  bool _ready = false;
+  bool _onboardingComplete = false;
+  bool _autoSaveDownloads = true;
+  ThemeMode _themeMode = ThemeMode.system;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final values = await Future.wait<Object>([
+      _settings.loadThemeMode(),
+      _settings.loadAutoSaveDownloads(),
+      _settings.isOnboardingComplete(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _themeMode = values[0] as ThemeMode;
+      _autoSaveDownloads = values[1] as bool;
+      _onboardingComplete = values[2] as bool;
+      _ready = true;
+    });
+  }
+
+  Future<void> _setTheme(ThemeMode mode) async {
+    await _settings.saveThemeMode(mode);
+    if (mounted) setState(() => _themeMode = mode);
+  }
+
+  Future<void> _setAutoSave(bool value) async {
+    await _settings.saveAutoSaveDownloads(value);
+    if (mounted) setState(() => _autoSaveDownloads = value);
+  }
+
+  Future<void> _finishOnboarding() async {
+    await _settings.completeOnboarding();
+    if (mounted) setState(() => _onboardingComplete = true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,14 +103,79 @@ class PDFMateApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      themeMode: ThemeMode.system,
-      home: const HomeScreen(),
+      themeMode: _themeMode,
+      home: !_ready
+          ? const _LaunchScreen()
+          : !_onboardingComplete
+              ? OnboardingScreen(onFinished: _finishOnboarding)
+              : HomeScreen(
+                  themeMode: _themeMode,
+                  autoSaveDownloads: _autoSaveDownloads,
+                  onThemeChanged: _setTheme,
+                  onAutoSaveChanged: _setAutoSave,
+                ),
+    );
+  }
+}
+
+class _LaunchScreen extends StatelessWidget {
+  const _LaunchScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 92,
+              height: 92,
+              decoration: BoxDecoration(
+                color: colors.primary,
+                borderRadius: BorderRadius.circular(26),
+              ),
+              child: Icon(
+                Icons.picture_as_pdf_rounded,
+                color: colors.onPrimary,
+                size: 52,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'PDFMate',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 18),
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    super.key,
+    required this.themeMode,
+    required this.autoSaveDownloads,
+    required this.onThemeChanged,
+    required this.onAutoSaveChanged,
+  });
+
+  final ThemeMode themeMode;
+  final bool autoSaveDownloads;
+  final Future<void> Function(ThemeMode mode) onThemeChanged;
+  final Future<void> Function(bool value) onAutoSaveChanged;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
