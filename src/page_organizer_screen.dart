@@ -318,9 +318,8 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                       : ReorderableListView.builder(
                           padding: const EdgeInsets.fromLTRB(12, 6, 12, 100),
                           itemCount: _pages.length,
-                          onReorder: (oldIndex, newIndex) {
+                          onReorderItem: (oldIndex, newIndex) {
                             setState(() {
-                              if (newIndex > oldIndex) newIndex--;
                               final item = _pages.removeAt(oldIndex);
                               _pages.insert(newIndex, item);
                             });
