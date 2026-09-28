@@ -8,6 +8,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart' as pdf_format;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
@@ -1195,12 +1196,130 @@ class PdfService {
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
-  }) {
+  }) async {
+    if (script == TextRecognitionScript.devanagiri) {
+      return _makeDevanagariSearchablePdf(source, password: password);
+    }
     return _makeSearchablePdfPreservingOriginal(
       source,
       script: script,
       password: password,
     );
+  }
+
+  /// The native watermark font cannot encode Devanagari. Build a new PDF from
+  /// page images and a bundled Unicode font so extracted Hindi text is real.
+  /// This path changes the PDF's structure; the UI discloses that tradeoff.
+  Future<File> _makeDevanagariSearchablePdf(
+    File source, {
+    String? password,
+  }) async {
+    final bytes = await rootBundle.load('assets/fonts/NotoSansDevanagariOCR.ttf');
+    final font = pw.Font.ttf(bytes);
+    final original = Pdf();
+    PdfDoc? doc;
+    final recognizer = TextRecognizer(script: TextRecognitionScript.devanagiri);
+    final output = await _newFile('Searchable_Hindi');
+    final pages = <File>[];
+    try {
+      doc = await original.open(FileSource(source), password: password);
+      for (var index = 0; index < doc.pageCount; index++) {
+        Uint8List? renderedBytes;
+        await for (final rendered in doc.render(
+          pages: PdfPages.single(index),
+          size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500),
+        )) {
+          renderedBytes = rendered.data;
+          break;
+        }
+        if (renderedBytes == null) {
+          throw StateError('Could not render page ${index + 1} for OCR.');
+        }
+        final decoded = img.decodePng(renderedBytes);
+        if (decoded == null) {
+          throw StateError('Could not decode page ${index + 1} for OCR.');
+        }
+        final input = await _newManagedTempFile('hindi_input_$index', extension: 'png');
+        await input.writeAsBytes(renderedBytes, flush: true);
+        RecognizedText recognized;
+        try {
+          recognized = await recognizer.processImage(InputImage.fromFilePath(input.path));
+        } finally {
+          await secureDeleteTemporary(input);
+        }
+
+        final page = doc.pages[index];
+        final width = page.effectiveWidth;
+        final height = page.effectiveHeight;
+        final overlays = <pw.Widget>[];
+        for (final block in recognized.blocks) {
+          for (final line in block.lines) {
+            for (final element in line.elements) {
+              if (element.text.trim().isEmpty) continue;
+              final rect = mapOcrRectToPdf(
+                leftPx: element.boundingBox.left,
+                topPx: element.boundingBox.top,
+                widthPx: element.boundingBox.width,
+                heightPx: element.boundingBox.height,
+                imageWidthPx: decoded.width.toDouble(),
+                imageHeightPx: decoded.height.toDouble(),
+                pdfWidthPt: width,
+                pdfHeightPt: height,
+              );
+              if (rect.width <= 0 || rect.height <= 0) continue;
+              overlays.add(pw.Positioned(
+                left: rect.left,
+                top: rect.top,
+                child: pw.Opacity(
+                  opacity: 0.001,
+                  child: pw.Text(element.text,
+                    style: pw.TextStyle(font: font,
+                      fontSize: math.max(2, rect.height * 0.8))),
+                ),
+              ));
+            }
+          }
+        }
+
+        final single = pw.Document(compress: true);
+        single.addPage(pw.Page(
+          pageFormat: pdf_format.PdfPageFormat(width, height),
+          margin: pw.EdgeInsets.zero,
+          build: (_) => pw.Stack(children: [
+            pw.Positioned.fill(child: pw.Image(pw.MemoryImage(renderedBytes!),
+              fit: pw.BoxFit.fill)),
+            ...overlays,
+          ]),
+        ));
+        final tempPage = await _newManagedTempFile('hindi_page_$index');
+        await tempPage.writeAsBytes(await single.save(), flush: true);
+        pages.add(tempPage);
+      }
+      if (pages.isEmpty) throw StateError('PDF has no pages.');
+      final merger = Pdf();
+      final sink = await FileSink.create(output);
+      try {
+        await merger.merge(
+          [for (final page in pages) FileSource(page) as DataSource], sink);
+        await sink.close();
+      } catch (_) {
+        await sink.close();
+        rethrow;
+      } finally {
+        await merger.dispose();
+      }
+      return output;
+    } catch (_) {
+      if (await output.exists()) await output.delete();
+      rethrow;
+    } finally {
+      for (final page in pages) {
+        await secureDeleteTemporary(page);
+      }
+      await recognizer.close();
+      await doc?.dispose();
+      await original.dispose();
+    }
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
