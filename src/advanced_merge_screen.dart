@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -107,7 +108,7 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
               break;
             }
             try {
-              file = await widget.service.unlockPdf(file, password);
+              file = await widget.service.decryptToTemporary(file, password);
               thumb = await widget.service.renderFirstThumbnail(file);
               break;
             } on PdfWrongPassword {
@@ -174,6 +175,14 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  @override
+  void dispose() {
+    for (final item in _items) {
+      unawaited(widget.service.secureDeleteTemporary(item.file));
+    }
+    super.dispose();
   }
 
   @override
