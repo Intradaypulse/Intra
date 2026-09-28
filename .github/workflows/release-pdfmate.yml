@@ -58,9 +58,23 @@ jobs:
           require FIREBASE_MESSAGING_SENDER_ID "$FIREBASE_MESSAGING_SENDER_ID"
           require FIREBASE_STORAGE_BUCKET "$FIREBASE_STORAGE_BUCKET"
 
-          for value in             "$ADMOB_APP_ID"             "$ADMOB_BANNER_ID"             "$ADMOB_INTERSTITIAL_ID"             "$ADMOB_REWARDED_ID"             "$ADMOB_APP_OPEN_ID"; do
+          for value in "$ADMOB_APP_ID" "$ADMOB_BANNER_ID" "$ADMOB_INTERSTITIAL_ID" "$ADMOB_REWARDED_ID" "$ADMOB_APP_OPEN_ID"; do
             if [[ "$value" == *"3940256099942544"* ]]; then
               echo "::error::Google test AdMob IDs are forbidden in the production release."
+              exit 1
+            fi
+          done
+
+          if [[ ! "$ADMOB_APP_ID" =~ ^ca-app-pub-[0-9]+~[0-9]+$ ]]; then
+            echo "::error::ADMOB_APP_ID must use ca-app-pub-...~... format."
+            exit 1
+          fi
+
+          for pair in             "ADMOB_BANNER_ID:$ADMOB_BANNER_ID"             "ADMOB_INTERSTITIAL_ID:$ADMOB_INTERSTITIAL_ID"             "ADMOB_REWARDED_ID:$ADMOB_REWARDED_ID"             "ADMOB_APP_OPEN_ID:$ADMOB_APP_OPEN_ID"; do
+            name="${pair%%:*}"
+            value="${pair#*:}"
+            if [[ ! "$value" =~ ^ca-app-pub-[0-9]+/[0-9]+$ ]]; then
+              echo "::error::$name must use ca-app-pub-.../... format."
               exit 1
             fi
           done
