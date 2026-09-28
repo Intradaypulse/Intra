@@ -230,9 +230,8 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
                   : ReorderableListView.builder(
                       padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
                       itemCount: _items.length,
-                      onReorder: (oldIndex, newIndex) {
+                      onReorderItem: (oldIndex, newIndex) {
                         setState(() {
-                          if (newIndex > oldIndex) newIndex--;
                           final item = _items.removeAt(oldIndex);
                           _items.insert(newIndex, item);
                         });
