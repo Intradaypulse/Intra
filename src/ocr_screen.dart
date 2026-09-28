@@ -291,6 +291,27 @@ class _OcrScreenState extends State<OcrScreen> {
     if (source == null) return;
     if (!await _ensureLargeOcrUnlocked()) return;
     if (!await _confirmSignedPdfModification()) return;
+    if (_script == TextRecognitionScript.devanagiri) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Hindi searchable copy'),
+          content: const Text(
+            'Hindi OCR creates new image-based pages with an embedded '
+            'searchable text layer. Original links, forms, annotations, '
+            'bookmarks, vector content and signatures will not carry over. '
+            'The original PDF stays unchanged. Continue?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true),
+              child: const Text('Create copy')),
+          ],
+        ),
+      );
+      if (proceed != true || !mounted) return;
+    }
 
     setState(() {
       _busy = true;
