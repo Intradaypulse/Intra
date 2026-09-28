@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'manual_crop_screen.dart';
+import 'scan_temp_session.dart';
 
 class LiveScannerScreen extends StatefulWidget {
   const LiveScannerScreen({super.key});
@@ -31,6 +32,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   DocumentCorners? _corners;
   AutoCaptureStatus _captureStatus = AutoCaptureStatus.searching;
   final List<File> _pages = [];
+  final ScanTempSession _tempSession = ScanTempSession();
 
   bool _starting = false;
   bool _capturing = false;
@@ -229,12 +231,15 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       });
     }
 
+    String? capturedPhotoPath;
     try {
       await _pauseStream();
       final photo = await controller.takePicture();
+      capturedPhotoPath = photo.path;
+      _tempSession.own(capturedPhotoPath);
 
       final detected = await _detector.detect(
-        ScanInput.file(photo.path),
+        ScanInput.file(capturedPhotoPath),
         sensitivity: DetectionSensitivity.lenient,
       );
 
@@ -242,7 +247,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       final result = await Navigator.of(context).push<ManualCropResult>(
         MaterialPageRoute(
           builder: (_) => ManualCropScreen(
-            imagePath: photo.path,
+            imagePath: capturedPhotoPath,
             initialCorners: detected,
           ),
         ),
@@ -254,6 +259,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
           '${dir.path}/pdfmate_scan_${DateTime.now().microsecondsSinceEpoch}.jpg',
         );
         await file.writeAsBytes(result.bytes, flush: true);
+        _tempSession.own(file.path);
         if (!mounted) return;
         setState(() {
           _pages.add(file);
@@ -263,6 +269,9 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     } catch (e) {
       if (mounted) setState(() => _error = 'Capture failed: $e');
     } finally {
+      if (capturedPhotoPath != null) {
+        await _tempSession.deletePath(capturedPhotoPath);
+      }
       _analyzer.reset();
       _capturing = false;
       final current = _controller;
@@ -298,11 +307,12 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   void _finish() {
     if (_pages.isEmpty) {
       Navigator.of(context).pop<List<String>>();
-    } else {
-      Navigator.of(context).pop<List<String>>(
-        [for (final page in _pages) page.path],
-      );
+      return;
     }
+    final paths = _tempSession.handOff(
+      [for (final page in _pages) page.path],
+    );
+    Navigator.of(context).pop<List<String>>(paths);
   }
 
   Future<void> _teardown() async {
@@ -331,6 +341,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_teardown());
+    unawaited(_tempSession.cleanupOwned());
     super.dispose();
   }
 
@@ -472,7 +483,9 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                                     onTap: () {
                                       final page = _pages[index];
                                       setState(() => _pages.removeAt(index));
-                                      page.delete().catchError((_) => page);
+                                      unawaited(
+                                        _tempSession.deletePath(page.path),
+                                      );
                                     },
                                     child: const Padding(
                                       padding: EdgeInsets.all(4),
