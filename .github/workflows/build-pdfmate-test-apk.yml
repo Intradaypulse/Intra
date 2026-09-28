@@ -162,24 +162,55 @@ jobs:
         working-directory: buildapp
         run: flutter test
 
-      - name: Build ARM64 debug APK
+      - name: Build universal debug APK
         working-directory: buildapp
         run: flutter build apk --debug --target-platform android-arm64
+
+      - name: Build release-candidate AAB
+        working-directory: buildapp
+        shell: bash
+        env:
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+        run: |
+          defines=()
+          [[ -n "$ADMOB_BANNER_ID" ]] && defines+=(--dart-define=ADMOB_BANNER_ID="$ADMOB_BANNER_ID")
+          [[ -n "$ADMOB_INTERSTITIAL_ID" ]] && defines+=(--dart-define=ADMOB_INTERSTITIAL_ID="$ADMOB_INTERSTITIAL_ID")
+          [[ -n "$ADMOB_REWARDED_ID" ]] && defines+=(--dart-define=ADMOB_REWARDED_ID="$ADMOB_REWARDED_ID")
+          [[ -n "$ADMOB_APP_OPEN_ID" ]] && defines+=(--dart-define=ADMOB_APP_OPEN_ID="$ADMOB_APP_OPEN_ID")
+          [[ -n "$FIREBASE_API_KEY" ]] && defines+=(--dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY")
+          [[ -n "$FIREBASE_APP_ID" ]] && defines+=(--dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID")
+          [[ -n "$FIREBASE_PROJECT_ID" ]] && defines+=(--dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID")
+          [[ -n "$FIREBASE_MESSAGING_SENDER_ID" ]] && defines+=(--dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID")
+          [[ -n "$FIREBASE_STORAGE_BUCKET" ]] && defines+=(--dart-define=FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET")
+          flutter build appbundle --release "${defines[@]}"
+          cp build/app/outputs/bundle/release/app-release.aab ../PDFMate-CI-ReleaseCandidate.aab
+          cd ..
+          sha256sum PDFMate-CI-ReleaseCandidate.aab > PDFMate-CI-ReleaseCandidate.aab.sha256
 
       - name: Verify APK
         run: |
           test -f buildapp/build/app/outputs/flutter-apk/app-debug.apk
-          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Beta-arm64.apk
-          sha256sum PDFMate-Beta-arm64.apk | tee PDFMate-Beta-arm64.apk.sha256
-          ls -lh PDFMate-Beta-arm64.apk
+          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Beta-universal.apk
+          sha256sum PDFMate-Beta-universal.apk | tee PDFMate-Beta-universal.apk.sha256
+          ls -lh PDFMate-Beta-universal.apk
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: PDFMate-Beta-APK
           path: |
-            PDFMate-Beta-arm64.apk
-            PDFMate-Beta-arm64.apk.sha256
+            PDFMate-Beta-universal.apk
+            PDFMate-Beta-universal.apk.sha256
+            PDFMate-CI-ReleaseCandidate.aab
+            PDFMate-CI-ReleaseCandidate.aab.sha256
           if-no-files-found: error
           retention-days: 14
 
