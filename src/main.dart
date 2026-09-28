@@ -314,136 +314,122 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _imagesToPdf() =>
       _runFileTask('Image to PDF', _service.imagesToPdf);
 
-  Future<void> _compress() =>
-      _runFileTask('Compression', _service.compressPdf);
-
-  Future<void> _merge() => _runFileTask('Merge', _service.mergePdfs);
-
-  Future<void> _rotate() =>
-      _runFileTask('Rotate', _service.rotateAllPages);
-
-  Future<void> _protect() async {
-    final controller = TextEditingController();
-    final password = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Protect PDF'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
-            border: OutlineInputBorder(),
+  Future<void> _completeAdvancedFile(
+    String label,
+    File? output,
+  ) async {
+    if (output == null) return;
+    setState(() => _busy = true);
+    try {
+      await _register(output);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$label complete'),
+          action: SnackBarAction(
+            label: 'Open',
+            onPressed: () => _openPath(
+              output.path,
+              output.uri.pathSegments.last,
+            ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = controller.text.trim();
-              if (value.isNotEmpty) Navigator.pop(context, value);
-            },
-            child: const Text('Protect'),
-          ),
-        ],
+      );
+      await AdsService.instance.recordCompletedOperation();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _compress() async {
+    final output = await Navigator.of(context).push<File>(
+      MaterialPageRoute(
+        builder: (_) => CompressionScreen(service: _service),
       ),
     );
-    controller.dispose();
-    if (password == null) return;
-    await _runFileTask(
-      'Password protection',
-      () => _service.passwordProtect(password),
+    await _completeAdvancedFile('Compression', output);
+  }
+
+  Future<void> _merge() async {
+    final output = await Navigator.of(context).push<File>(
+      MaterialPageRoute(
+        builder: (_) => AdvancedMergeScreen(service: _service),
+      ),
     );
+    await _completeAdvancedFile('Merge', output);
   }
 
   Future<void> _split() async {
+    final outputs = await Navigator.of(context).push<List<File>>(
+      MaterialPageRoute(
+        builder: (_) => AdvancedSplitScreen(service: _service),
+      ),
+    );
+    if (outputs == null || outputs.isEmpty) return;
+
     setState(() => _busy = true);
     try {
-      final outputs = await _service.splitEveryPage();
       for (final output in outputs) {
         await _register(output);
       }
-      if (!mounted || outputs.isEmpty) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Created ${outputs.length} split PDFs')),
+        SnackBar(content: Text('Created ${outputs.length} split PDF(s)')),
       );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Split failed: $e')),
-        );
-      }
+      await AdsService.instance.recordCompletedOperation();
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _ocr() async {
-    setState(() => _busy = true);
-    try {
-      final text = await _service.ocrImage();
-      if (!mounted || text == null) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Extracted text'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: SelectableText(
-                text.isEmpty ? 'No text detected.' : text,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
+  Future<void> _organize() async {
+    final output = await Navigator.of(context).push<File>(
+      MaterialPageRoute(
+        builder: (_) => PageOrganizerScreen(service: _service),
+      ),
+    );
+    await _completeAdvancedFile('Page organization', output);
+  }
+
+  Future<void> _signPdf() async {
+    final output = await Navigator.of(context).push<File>(
+      MaterialPageRoute(
+        builder: (_) => SignaturePlacementScreen(service: _service),
+      ),
+    );
+    await _completeAdvancedFile('Signature', output);
+  }
+
+  Future<void> _security(SecurityMode mode) async {
+    final output = await Navigator.of(context).push<File>(
+      MaterialPageRoute(
+        builder: (_) => SecurityScreen(
+          service: _service,
+          initialMode: mode,
         ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('OCR failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+      ),
+    );
+    await _completeAdvancedFile(
+      mode == SecurityMode.protect ? 'PDF protection' : 'PDF unlock',
+      output,
+    );
   }
 
+  Future<void> _ocrPdf() async {
+    final output = await Navigator.of(context).push<File>(
+      MaterialPageRoute(
+        builder: (_) => OcrScreen(service: _service),
+      ),
+    );
+    await _completeAdvancedFile('Searchable PDF', output);
+  }
 
   Future<void> _pdfToJpg() async {
-    setState(() => _busy = true);
-    try {
-      final outputs = await _service.pdfToJpg();
-      if (!mounted || outputs.isEmpty) return;
-      await SharePlus.instance.share(
-        ShareParams(
-          files: outputs.map((e) => XFile(e.path)).toList(),
-          text: 'PDF pages exported by PDFMate',
-        ),
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Exported ${outputs.length} JPG images')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PDF to JPG failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => PdfToJpgScreen(service: _service),
+      ),
+    );
   }
 
   Future<void> _extractPdfText() async {
@@ -454,12 +440,14 @@ class _HomeScreenState extends State<HomeScreen> {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('PDF text'),
+          title: const Text('Embedded PDF text'),
           content: SizedBox(
             width: double.maxFinite,
             child: SingleChildScrollView(
               child: SelectableText(
-                text.trim().isEmpty ? 'No embedded text found.' : text,
+                text.trim().isEmpty
+                    ? 'No embedded text found. Use OCR for scanned pages.'
+                    : text,
               ),
             ),
           ),
@@ -482,103 +470,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _deletePages() async {
-    final controller = TextEditingController();
-    final raw = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete pages'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.text,
-          decoration: const InputDecoration(
-            labelText: 'Page numbers',
-            hintText: 'Example: 2,4,5',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (raw == null || raw.trim().isEmpty) return;
-    final pages = raw
-        .split(',')
-        .map((e) => int.tryParse(e.trim()))
-        .whereType<int>()
-        .where((e) => e > 0)
-        .map((e) => e - 1)
-        .toSet()
-        .toList()
-      ..sort();
-    if (pages.isEmpty) return;
-    await _runFileTask(
-      'Delete pages',
-      () => _service.deletePdfPages(pages),
-    );
-  }
-
-  Future<void> _reorderPages() async {
-    final controller = TextEditingController();
-    final raw = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Reorder pages'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: 'New page order',
-            hintText: 'Example: 3,1,2',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (raw == null || raw.trim().isEmpty) return;
-    final order = raw
-        .split(',')
-        .map((e) => int.tryParse(e.trim()))
-        .whereType<int>()
-        .where((e) => e > 0)
-        .map((e) => e - 1)
-        .toList();
-    if (order.isEmpty) return;
-    await _runFileTask(
-      'Reorder pages',
-      () => _service.reorderPdfPages(order),
-    );
-  }
-
-  Future<void> _signPdf() async {
-    final Uint8List? signature = await Navigator.of(context).push<Uint8List>(
-      MaterialPageRoute(builder: (_) => const SignatureScreen()),
-    );
-    if (signature == null) return;
-    await _runFileTask(
-      'Signature',
-      () => _service.addSignature(signature),
-    );
-  }
 
   void _open(PdfRecord record) => _openPath(record.path, record.name);
 
