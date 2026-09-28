@@ -1,0 +1,160 @@
+name: Build PDFMate Release AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch or commit
+        required: true
+        default: pdfmate-apk-build
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Validate release secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
+          test -n "$KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
+          test -n "$KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
+          test -n "$KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
+          test -n "$ADMOB_APP_ID" || (echo "Missing ADMOB_APP_ID" && exit 1)
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create Android project
+        run: |
+          flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
+          cp src/pubspec.yaml buildapp/pubspec.yaml
+          cp src/*.dart buildapp/lib/
+          rm -f buildapp/test/widget_test.dart
+
+      - name: Configure Android release
+        env:
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > buildapp/android/app/pdfmate-upload.jks
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          manifest = Path("buildapp/android/app/src/main/AndroidManifest.xml")
+          s = manifest.read_text()
+          if 'android.permission.CAMERA' not in s:
+              s = s.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                  '    <uses-permission android:name="android.permission.CAMERA"/>'
+              )
+          s = s.replace('android:label="pdfmate"', 'android:label="PDFMate"')
+          marker = '<application'
+          pos = s.find(marker)
+          app_open = s.find('>', pos)
+          meta = (
+              '\n        <meta-data\n'
+              '            android:name="com.google.android.gms.ads.APPLICATION_ID"\n'
+              f'            android:value="{os.environ["ADMOB_APP_ID"]}"/>'
+          )
+          if 'com.google.android.gms.ads.APPLICATION_ID' not in s:
+              s = s[:app_open+1] + meta + s[app_open+1:]
+          manifest.write_text(s)
+
+          gradle = Path("buildapp/android/app/build.gradle.kts")
+          g = gradle.read_text()
+          g = g.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36")
+          g = g.replace("minSdk = flutter.minSdkVersion", "minSdk = 23")
+          g = g.replace("targetSdk = flutter.targetSdkVersion", "targetSdk = 36")
+          block = '''
+              signingConfigs {
+                  create("release") {
+                      keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                      storeFile = file("pdfmate-upload.jks")
+                      storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                  }
+              }
+          '''
+          g = g.replace("    buildTypes {", block + "\n    buildTypes {")
+          g = g.replace(
+              'signingConfig = signingConfigs.getByName("debug")',
+              'signingConfig = signingConfigs.getByName("release")'
+          )
+          gradle.write_text(g)
+          PY
+
+      - name: Resolve and analyze
+        working-directory: buildapp
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos
+
+      - name: Build signed release AAB
+        working-directory: buildapp
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+        shell: bash
+        run: |
+          args=(
+            --release
+            --dart-define=ADMOB_BANNER_ID="$ADMOB_BANNER_ID"
+            --dart-define=ADMOB_INTERSTITIAL_ID="$ADMOB_INTERSTITIAL_ID"
+            --dart-define=ADMOB_REWARDED_ID="$ADMOB_REWARDED_ID"
+            --dart-define=ADMOB_APP_OPEN_ID="$ADMOB_APP_OPEN_ID"
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY"
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID"
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID"
+            --dart-define=FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET"
+          )
+          flutter build appbundle "${args[@]}"
+
+      - name: Verify and checksum
+        run: |
+          test -f buildapp/build/app/outputs/bundle/release/app-release.aab
+          cp buildapp/build/app/outputs/bundle/release/app-release.aab PDFMate-release.aab
+          sha256sum PDFMate-release.aab | tee PDFMate-release.aab.sha256
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Release-AAB
+          path: |
+            PDFMate-release.aab
+            PDFMate-release.aab.sha256
+          retention-days: 30
