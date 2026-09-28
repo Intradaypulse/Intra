@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:document_scan/document_scan.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:file_saver/file_saver.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -106,11 +107,26 @@ class PdfService {
   Future<File?> imagesToPdf() async {
     final images = await imagePicker.pickMultiImage(imageQuality: 92);
     if (images.isEmpty) return null;
-    final bytes = <Uint8List>[];
-    for (final image in images) {
-      bytes.add(await image.readAsBytes());
+
+    final output = await _newFile('Images');
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    try {
+      await pdf.imagesToPdf(
+        [
+          for (final image in images)
+            FileSource(File(image.path)) as DataSource,
+        ],
+        sink,
+      );
+      await sink.close();
+      return output;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
     }
-    return _imagesToPdfBytes(bytes, 'Images');
   }
 
   Future<File> _imagesToPdfBytes(
@@ -963,6 +979,62 @@ class PdfService {
     } finally {
       await pdf.dispose();
     }
+  }
+
+
+  Future<File> createScannedPdfFromFiles(List<String> paths) async {
+    if (paths.isEmpty) {
+      throw ArgumentError('No scanned pages supplied.');
+    }
+    final output = await _newFile('Scan');
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    try {
+      await pdf.imagesToPdf(
+        [
+          for (final path in paths)
+            FileSource(File(path)) as DataSource,
+        ],
+        sink,
+      );
+      await sink.close();
+      return output;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<String> savePdfToDownloads(File source) async {
+    final rawName = source.uri.pathSegments.last;
+    final name = rawName.replaceFirst(
+      RegExp(r'\.pdf$', caseSensitive: false),
+      '',
+    );
+    return FileSaver.instance.saveToDownloads(
+      name: name,
+      filePath: source.path,
+      fileExtension: 'pdf',
+      mimeType: MimeType.pdf,
+      subfolder: 'PDFMate',
+    );
+  }
+
+  Future<String> saveJpgToGallery(File source) async {
+    final rawName = source.uri.pathSegments.last;
+    final name = rawName.replaceFirst(
+      RegExp(r'\.(jpg|jpeg)$', caseSensitive: false),
+      '',
+    );
+    return FileSaver.instance.saveToGallery(
+      name: name,
+      filePath: source.path,
+      fileExtension: 'jpg',
+      mimeType: MimeType.jpeg,
+      album: 'PDFMate',
+    );
   }
 
 }
