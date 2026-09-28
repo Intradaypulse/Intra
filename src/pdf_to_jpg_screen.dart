@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -55,7 +56,11 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
   }
 
   Future<void> _pickAndConvert() async {
+    final previous = _source;
     final picked = await widget.service.pickPdfFile();
+    if (picked != null && previous != null && previous.path != picked.path) {
+      await widget.service.secureDeleteTemporary(previous);
+    }
     if (picked == null) return;
     var file = picked;
 
@@ -168,6 +173,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
     for (final file in _images) {
       file.delete().catchError((_) => file);
     }
+    unawaited(widget.service.secureDeleteTemporary(_source));
     super.dispose();
   }
 
