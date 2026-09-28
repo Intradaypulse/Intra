@@ -1458,13 +1458,57 @@ class PdfService {
     return result;
   }
 
-  Future<String?> saveJpgToGallery(File source) async {
+  Future<String> saveJpgToGallery(File source) async {
     final rawName = source.uri.pathSegments.last;
     final name = rawName.replaceFirst(
-      RegExp(r'\.(jpg|jpeg)$', caseSensitive: false),
+      RegExp(r'\.(jpg|jpeg)
+
+
+  Future<List<File>> pdfToJpgFromFile(
+    File source, {
+    String? password,
+    int maxWidth = 2200,
+    int maxHeight = 3100,
+  }) async {
+    final pdf = Pdf();
+    PdfDoc? doc;
+    final outputs = <File>[];
+    final dir = await _tmp();
+
+    try {
+      doc = await pdf.open(FileSource(source), password: password);
+      var pageNo = 1;
+      await for (final page in doc.render(
+        pages: const PdfPages.all(),
+        size: PdfRenderSize(
+          maxWidth: maxWidth,
+          maxHeight: maxHeight,
+        ),
+      )) {
+        final decoded = img.decodePng(page.data);
+        if (decoded == null) continue;
+        final file = File(
+          '${dir.path}/PDFMate_Page_${pageNo}_${DateTime.now().microsecondsSinceEpoch}.jpg',
+        );
+        await file.writeAsBytes(
+          img.encodeJpg(decoded, quality: 90),
+          flush: true,
+        );
+        outputs.add(file);
+        pageNo++;
+      }
+      return outputs;
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+}
+, caseSensitive: false),
       '',
     );
-    return FileSaver.instance.saveToGallery(
+    final result = await FileSaver.instance.saveToGallery(
       name: name,
       filePath: source.path,
       fileExtension: 'jpg',
@@ -1472,6 +1516,13 @@ class PdfService {
       customMimeType: 'image/jpeg',
       album: 'PDFMate',
     );
+    if (result == null || result.trim().isEmpty) {
+      throw FileSystemException(
+        'Android did not confirm the Gallery copy.',
+        source.path,
+      );
+    }
+    return result;
   }
 
 
