@@ -145,6 +145,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
               TextField(
                 controller: _ownerController,
                 obscureText: true,
+                onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                   labelText: 'Owner password',
                   helperText:
@@ -189,6 +190,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
               TextField(
                 controller: _unlockController,
                 obscureText: true,
+                onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                   labelText: 'Current PDF password',
                   border: OutlineInputBorder(),
