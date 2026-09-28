@@ -49,6 +49,19 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
+          manifest = Path("buildapp/android/app/src/main/AndroidManifest.xml")
+          m = manifest.read_text()
+          root = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          if 'android.permission.CAMERA' not in m:
+              m = m.replace(
+                  root,
+                  root + '\n'
+                  '    <uses-permission android:name="android.permission.CAMERA"/>\n'
+                  '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n'
+                  '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>'
+              )
+          manifest.write_text(m)
+
           p = Path("buildapp/android/app/build.gradle.kts")
           s = p.read_text()
           s = s.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36")
