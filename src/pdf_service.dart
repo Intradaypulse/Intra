@@ -1373,22 +1373,262 @@ class PdfService {
     }
   }
 
+  Future<pw.Font> _ocrFontForScript(
+    TextRecognitionScript script,
+  ) async {
+    try {
+      return switch (script) {
+        TextRecognitionScript.devanagiri =>
+          await PdfGoogleFonts.notoSansDevanagariRegular(),
+        TextRecognitionScript.chinese =>
+          await PdfGoogleFonts.notoSansSCRegular(),
+        TextRecognitionScript.japanese =>
+          await PdfGoogleFonts.notoSansJPRegular(),
+        TextRecognitionScript.korean =>
+          await PdfGoogleFonts.notoSansKRRegular(),
+        _ => await PdfGoogleFonts.notoSansRegular(),
+      };
+    } catch (e) {
+      if (script == TextRecognitionScript.latin) {
+        return pw.Font.helvetica();
+      }
+      throw StateError(
+        'Unicode OCR font could not be loaded. Connect to the internet once '
+        'and retry so PDFMate can cache the required Noto font. Details: $e',
+      );
+    }
+  }
+
+  Future<bool> _allPagesAlreadySearchable(
+    PdfDoc doc, {
+    int minimumCharsPerPage = 3,
+  }) async {
+    if (doc.pageCount == 0) return false;
+    for (var i = 0; i < doc.pageCount; i++) {
+      final text = await doc.extract(pages: PdfPages.single(i));
+      if (text.trim().length < minimumCharsPerPage) return false;
+    }
+    return true;
+  }
+
   Future<File> makeSearchablePdf(
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
-  }) {
-    if (script == TextRecognitionScript.latin) {
-      return _makeLatinSearchablePdfPreservingOriginal(
-        source,
-        password: password,
-      );
+  }) async {
+    final engine = Pdf();
+    PdfDoc? doc;
+    final recognizer = TextRecognizer(script: script);
+    final pageFiles = <File>[];
+    final chunkFiles = <File>[];
+    final output = await _newFile('Searchable');
+
+    try {
+      doc = await engine.open(FileSource(source), password: password);
+
+      if (await _allPagesAlreadySearchable(doc)) {
+        await source.copy(output.path);
+        return output;
+      }
+
+      final ocrFont = await _ocrFontForScript(script);
+      const chunkSize = 12;
+
+      Future<void> flushChunk() async {
+        if (pageFiles.isEmpty) return;
+        final chunk = await _newManagedTempFile(
+          'searchable_chunk_${chunkFiles.length}',
+          extension: 'pdf',
+        );
+        final pdf = Pdf();
+        final sink = await FileSink.create(chunk);
+        try {
+          await pdf.merge(
+            pageFiles.map<DataSource>((file) => FileSource(file)).toList(),
+            sink,
+          );
+          await sink.close();
+          chunkFiles.add(chunk);
+        } catch (_) {
+          await sink.close();
+          await secureDeleteTemporary(chunk);
+          rethrow;
+        } finally {
+          await pdf.dispose();
+        }
+        for (final file in List<File>.from(pageFiles)) {
+          await secureDeleteTemporary(file);
+        }
+        pageFiles.clear();
+      }
+
+      for (var index = 0; index < doc.pageCount; index++) {
+        Uint8List? renderedBytes;
+        await for (final rendered in doc.render(
+          pages: PdfPages.single(index),
+          size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
+        )) {
+          renderedBytes = rendered.data;
+          break;
+        }
+        final pageBytes = renderedBytes;
+        if (pageBytes == null) continue;
+
+        final decoded = img.decodePng(pageBytes);
+        if (decoded == null) {
+          throw StateError('Could not decode rendered page ${index + 1}.');
+        }
+
+        final tempImage = await _newManagedTempFile(
+          'searchable_image_$index',
+          extension: 'png',
+        );
+        await tempImage.writeAsBytes(pageBytes, flush: true);
+
+        RecognizedText recognized;
+        try {
+          recognized = await recognizer.processImage(
+            InputImage.fromFilePath(tempImage.path),
+          );
+        } finally {
+          await secureDeleteTemporary(tempImage);
+        }
+
+        final info = doc.pages[index];
+        final singlePage = pw.Document();
+        final pageImage = pw.MemoryImage(pageBytes);
+        final overlays = <pw.Widget>[];
+
+        for (final block in recognized.blocks) {
+          for (final line in block.lines) {
+            final elements = line.elements;
+            if (elements.isEmpty) {
+              continue;
+            }
+
+            for (final element in elements) {
+              final placement = mapOcrRectToPdf(
+                leftPx: element.boundingBox.left,
+                topPx: element.boundingBox.top,
+                widthPx: element.boundingBox.width,
+                heightPx: element.boundingBox.height,
+                imageWidthPx: decoded.width.toDouble(),
+                imageHeightPx: decoded.height.toDouble(),
+                pdfWidthPt: info.width,
+                pdfHeightPt: info.height,
+              );
+              if (placement.width <= 0 ||
+                  placement.height <= 0 ||
+                  element.text.trim().isEmpty) {
+                continue;
+              }
+
+              final angle = (line.angle ?? 0) * math.pi / 180;
+              pw.Widget textWidget = pw.FittedBox(
+                fit: pw.BoxFit.fill,
+                alignment: pw.Alignment.centerLeft,
+                child: pw.Text(
+                  element.text,
+                  maxLines: 1,
+                  style: pw.TextStyle(
+                    font: ocrFont,
+                    fontSize: math.max(2, placement.height * 0.78),
+                  ),
+                ),
+              );
+              if (angle.abs() > 0.001) {
+                textWidget = pw.Transform.rotate(
+                  angle: angle,
+                  child: textWidget,
+                );
+              }
+
+              overlays.add(
+                pw.Positioned(
+                  left: placement.left,
+                  top: placement.top,
+                  child: pw.Container(
+                    width: placement.width,
+                    height: placement.height,
+                    child: pw.Opacity(
+                      opacity: 0.01,
+                      child: textWidget,
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+        }
+
+        singlePage.addPage(
+          pw.Page(
+            pageFormat: pdfw.PdfPageFormat(info.width, info.height),
+            margin: pw.EdgeInsets.zero,
+            build: (_) => pw.Stack(
+              children: [
+                pw.Positioned.fill(
+                  child: pw.Image(pageImage, fit: pw.BoxFit.fill),
+                ),
+                ...overlays,
+              ],
+            ),
+          ),
+        );
+
+        final pageFile = await _newManagedTempFile(
+          'searchable_page_$index',
+          extension: 'pdf',
+        );
+        await pageFile.writeAsBytes(await singlePage.save(), flush: true);
+        pageFiles.add(pageFile);
+
+        if (pageFiles.length >= chunkSize) {
+          await flushChunk();
+        }
+      }
+
+      await flushChunk();
+
+      if (chunkFiles.isEmpty) {
+        throw StateError('No pages were generated.');
+      }
+
+      if (chunkFiles.length == 1) {
+        await chunkFiles.single.copy(output.path);
+        return output;
+      }
+
+      final mergePdf = Pdf();
+      final sink = await FileSink.create(output);
+      try {
+        await mergePdf.merge(
+          chunkFiles.map<DataSource>((file) => FileSource(file)).toList(),
+          sink,
+        );
+        await sink.close();
+      } catch (_) {
+        await sink.close();
+        try {
+          await output.delete();
+        } catch (_) {}
+        rethrow;
+      } finally {
+        await mergePdf.dispose();
+      }
+
+      return output;
+    } finally {
+      await recognizer.close();
+      await doc?.dispose();
+      await engine.dispose();
+      for (final file in pageFiles) {
+        await secureDeleteTemporary(file);
+      }
+      for (final file in chunkFiles) {
+        await secureDeleteTemporary(file);
+      }
     }
-    return _makeUnicodeSearchablePdf(
-      source,
-      script: script,
-      password: password,
-    );
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
