@@ -13,6 +13,7 @@ import 'package:pdf/pdf.dart' as pdfw;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
+import 'package:printing/printing.dart';
 
 import 'pdf_rules.dart';
 
@@ -988,39 +989,82 @@ class PdfService {
     }
   }
 
-  Future<File> makeSearchablePdf(
+  Future<pw.Font> _ocrOverlayFont(TextRecognitionScript script) async {
+    try {
+      return switch (script) {
+        TextRecognitionScript.chinese =>
+          await PdfGoogleFonts.notoSansSCRegular(),
+        TextRecognitionScript.devanagiri =>
+          await PdfGoogleFonts.notoSansDevanagariRegular(),
+        TextRecognitionScript.japanese =>
+          await PdfGoogleFonts.notoSansJPRegular(),
+        TextRecognitionScript.korean =>
+          await PdfGoogleFonts.notoSansKRRegular(),
+        TextRecognitionScript.latin =>
+          await PdfGoogleFonts.notoSansRegular(),
+      };
+    } catch (error) {
+      if (script == TextRecognitionScript.latin) {
+        return pw.Font.helvetica();
+      }
+      throw StateError(
+        'The Unicode OCR font could not be loaded. '
+        'Connect to the internet once so PDFMate can cache the Noto font, '
+        'then retry. Details: $error',
+      );
+    }
+  }
+
+  Future<bool> hasDigitalSignatures(
     File source, {
-    TextRecognitionScript script = TextRecognitionScript.latin,
+    String? password,
+  }) async {
+    final pdf = Pdf();
+    PdfDoc? doc;
+    try {
+      doc = await pdf.open(FileSource(source), password: password);
+      return (await doc.getSignatures()).isNotEmpty;
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+  Future<File> _makeLatinSearchablePdfPreservingOriginal(
+    File source, {
     String? password,
   }) async {
     final engine = Pdf();
     PdfDoc? doc;
-    final recognizer = TextRecognizer(script: script);
-    final pageFiles = <File>[];
+    PdfEditor? editor;
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     final output = await _newFile('Searchable');
+    var changed = false;
 
     try {
       doc = await engine.open(FileSource(source), password: password);
+      editor = await engine.edit(FileSource(source), password: password);
 
       for (var index = 0; index < doc.pageCount; index++) {
-        Uint8List? renderedBytes;
+        final existing =
+            await doc.extract(pages: PdfPages.single(index));
+        if (existing.trim().isNotEmpty) continue;
+
+        Uint8List? pageBytes;
         await for (final rendered in doc.render(
           pages: PdfPages.single(index),
-          size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
+          size: const PdfRenderSize(maxWidth: 2200, maxHeight: 3200),
         )) {
-          renderedBytes = rendered.data;
+          pageBytes = rendered.data;
           break;
         }
-        final pageBytes = renderedBytes;
         if (pageBytes == null) continue;
 
         final decoded = img.decodePng(pageBytes);
-        if (decoded == null) {
-          throw StateError('Could not decode rendered page ${index + 1}.');
-        }
+        if (decoded == null) continue;
 
         final tempImage = await _newManagedTempFile(
-          'searchable_image_$index',
+          'latin_ocr_$index',
           extension: 'png',
         );
         await tempImage.writeAsBytes(pageBytes, flush: true);
@@ -1035,97 +1079,63 @@ class PdfService {
         }
 
         final info = doc.pages[index];
-        final singlePage = pw.Document();
-        final pageImage = pw.MemoryImage(pageBytes);
-        final overlays = <pw.Widget>[];
+        final pageWidth = info.effectiveWidth;
+        final pageHeight = info.effectiveHeight;
 
-        for (final block in recognized.blocks) {
-          for (final line in block.lines) {
-            final placement = mapOcrRectToPdf(
-              leftPx: line.boundingBox.left,
-              topPx: line.boundingBox.top,
-              widthPx: line.boundingBox.width,
-              heightPx: line.boundingBox.height,
-              imageWidthPx: decoded.width.toDouble(),
-              imageHeightPx: decoded.height.toDouble(),
-              pdfWidthPt: info.width,
-              pdfHeightPt: info.height,
-            );
-            if (placement.width <= 0 ||
-                placement.height <= 0 ||
-                line.text.trim().isEmpty) {
-              continue;
-            }
+        for (final textBlock in recognized.blocks) {
+          for (final line in textBlock.lines) {
+            for (final element in line.elements) {
+              final text = element.text.trim();
+              if (text.isEmpty) continue;
 
-            final angle = (line.angle ?? 0) * math.pi / 180;
-            pw.Widget textWidget = pw.FittedBox(
-              fit: pw.BoxFit.fill,
-              alignment: pw.Alignment.centerLeft,
-              child: pw.Text(
-                line.text,
-                maxLines: 1,
-                style: pw.TextStyle(
-                  fontSize: math.max(2, placement.height * 0.78),
-                ),
-              ),
-            );
-            if (angle.abs() > 0.001) {
-              textWidget = pw.Transform.rotate(
-                angle: angle,
-                child: textWidget,
+              final placement = mapOcrRectToPdf(
+                leftPx: element.boundingBox.left,
+                topPx: element.boundingBox.top,
+                widthPx: element.boundingBox.width,
+                heightPx: element.boundingBox.height,
+                imageWidthPx: decoded.width.toDouble(),
+                imageHeightPx: decoded.height.toDouble(),
+                pdfWidthPt: pageWidth,
+                pdfHeightPt: pageHeight,
               );
-            }
+              if (placement.width <= 0 || placement.height <= 0) continue;
 
-            overlays.add(
-              pw.Positioned(
-                left: placement.left,
-                top: placement.top,
-                child: pw.Container(
+              final yFromBottom =
+                  math.max(0.0, pageHeight - placement.top - placement.height);
+
+              await editor.addWatermark(
+                index,
+                text,
+                style: PdfWatermarkStyle(
+                  fontSize: math.max(2, placement.height * 0.82),
+                  opacity: 0.001,
+                  rotation: line.angle ?? 0,
+                  color: PdfColor.black,
+                ),
+                position: PdfWatermarkPosition.exact(
+                  x: placement.left,
+                  y: yFromBottom,
                   width: placement.width,
                   height: placement.height,
-                  child: pw.Opacity(
-                    opacity: 0.01,
-                    child: textWidget,
-                  ),
                 ),
-              ),
-            );
+                layer: PdfWatermarkLayer.background,
+              );
+              changed = true;
+            }
           }
         }
-
-        singlePage.addPage(
-          pw.Page(
-            pageFormat: pdfw.PdfPageFormat(info.width, info.height),
-            margin: pw.EdgeInsets.zero,
-            build: (_) => pw.Stack(
-              children: [
-                pw.Positioned.fill(
-                  child: pw.Image(pageImage, fit: pw.BoxFit.fill),
-                ),
-                ...overlays,
-              ],
-            ),
-          ),
-        );
-
-        final pageFile = await _newManagedTempFile(
-          'searchable_page_$index',
-          extension: 'pdf',
-        );
-        await pageFile.writeAsBytes(await singlePage.save(), flush: true);
-        pageFiles.add(pageFile);
       }
 
-      if (pageFiles.isEmpty) {
-        throw StateError('No pages were generated.');
+      if (!changed) {
+        await source.copy(output.path);
+        return output;
       }
 
-      final mergePdf = Pdf();
       final sink = await FileSink.create(output);
       try {
-        await mergePdf.merge(
-          pageFiles.map<DataSource>((file) => FileSource(file)).toList(),
+        await editor.save(
           sink,
+          options: const PdfSaveOptions.incremental(),
         );
         await sink.close();
       } catch (_) {
@@ -1134,19 +1144,251 @@ class PdfService {
           await output.delete();
         } catch (_) {}
         rethrow;
-      } finally {
-        await mergePdf.dispose();
+      }
+      return output;
+    } finally {
+      await recognizer.close();
+      await editor?.dispose();
+      await doc?.dispose();
+      await engine.dispose();
+    }
+  }
+
+  Future<File> _makeUnicodeSearchablePdf(
+    File source, {
+    required TextRecognitionScript script,
+    String? password,
+  }) async {
+    final engine = Pdf();
+    PdfDoc? doc;
+    final recognizer = TextRecognizer(script: script);
+    final output = await _newFile('Searchable');
+    pw.Font? overlayFont;
+    Pdf? assemblerEngine;
+    PdfEditor? assembler;
+    var generatedPages = 0;
+
+    try {
+      doc = await engine.open(FileSource(source), password: password);
+
+      var allPagesAlreadySearchable = true;
+      for (var index = 0; index < doc.pageCount; index++) {
+        final existing =
+            await doc.extract(pages: PdfPages.single(index));
+        if (existing.trim().isEmpty) {
+          allPagesAlreadySearchable = false;
+          break;
+        }
+      }
+      if (allPagesAlreadySearchable) {
+        await source.copy(output.path);
+        return output;
+      }
+
+      for (var index = 0; index < doc.pageCount; index++) {
+        final existing =
+            await doc.extract(pages: PdfPages.single(index));
+        File pageFile;
+
+        if (existing.trim().isNotEmpty) {
+          pageFile = await _newManagedTempFile(
+            'searchable_original_$index',
+            extension: 'pdf',
+          );
+          final extractPdf = Pdf();
+          final extractSink = await FileSink.create(pageFile);
+          try {
+            await extractPdf.extractPages(
+              FileSource(source),
+              extractSink,
+              pages: [index],
+              password: password,
+            );
+            await extractSink.close();
+          } catch (_) {
+            await extractSink.close();
+            await secureDeleteTemporary(pageFile);
+            rethrow;
+          } finally {
+            await extractPdf.dispose();
+          }
+        } else {
+          Uint8List? renderedBytes;
+          await for (final rendered in doc.render(
+            pages: PdfPages.single(index),
+            size: const PdfRenderSize(maxWidth: 2200, maxHeight: 3200),
+          )) {
+            renderedBytes = rendered.data;
+            break;
+          }
+          final pageBytes = renderedBytes;
+          if (pageBytes == null) continue;
+
+          final decoded = img.decodePng(pageBytes);
+          if (decoded == null) {
+            throw StateError(
+              'Could not decode rendered page ${index + 1}.',
+            );
+          }
+
+          final tempImage = await _newManagedTempFile(
+            'unicode_ocr_$index',
+            extension: 'png',
+          );
+          await tempImage.writeAsBytes(pageBytes, flush: true);
+
+          RecognizedText recognized;
+          try {
+            recognized = await recognizer.processImage(
+              InputImage.fromFilePath(tempImage.path),
+            );
+          } finally {
+            await secureDeleteTemporary(tempImage);
+          }
+
+          overlayFont ??= await _ocrOverlayFont(script);
+          final info = doc.pages[index];
+          final pageWidth = info.effectiveWidth;
+          final pageHeight = info.effectiveHeight;
+          final singlePage = pw.Document();
+          final pageImage = pw.MemoryImage(pageBytes);
+          final overlays = <pw.Widget>[];
+
+          for (final textBlock in recognized.blocks) {
+            for (final line in textBlock.lines) {
+              for (final element in line.elements) {
+                final text = element.text.trim();
+                if (text.isEmpty) continue;
+
+                final placement = mapOcrRectToPdf(
+                  leftPx: element.boundingBox.left,
+                  topPx: element.boundingBox.top,
+                  widthPx: element.boundingBox.width,
+                  heightPx: element.boundingBox.height,
+                  imageWidthPx: decoded.width.toDouble(),
+                  imageHeightPx: decoded.height.toDouble(),
+                  pdfWidthPt: pageWidth,
+                  pdfHeightPt: pageHeight,
+                );
+                if (placement.width <= 0 || placement.height <= 0) {
+                  continue;
+                }
+
+                final angle = (line.angle ?? 0) * math.pi / 180;
+                pw.Widget textWidget = pw.FittedBox(
+                  fit: pw.BoxFit.fill,
+                  alignment: pw.Alignment.centerLeft,
+                  child: pw.Text(
+                    text,
+                    maxLines: 1,
+                    style: pw.TextStyle(
+                      font: overlayFont,
+                      fontSize: math.max(2, placement.height * 0.82),
+                    ),
+                  ),
+                );
+                if (angle.abs() > 0.001) {
+                  textWidget = pw.Transform.rotate(
+                    angle: angle,
+                    child: textWidget,
+                  );
+                }
+
+                overlays.add(
+                  pw.Positioned(
+                    left: placement.left,
+                    top: placement.top,
+                    child: pw.Container(
+                      width: placement.width,
+                      height: placement.height,
+                      child: pw.Opacity(
+                        opacity: 0.001,
+                        child: textWidget,
+                      ),
+                    ),
+                  ),
+                );
+              }
+            }
+          }
+
+          singlePage.addPage(
+            pw.Page(
+              pageFormat: pdfw.PdfPageFormat(pageWidth, pageHeight),
+              margin: pw.EdgeInsets.zero,
+              build: (_) => pw.Stack(
+                children: [
+                  pw.Positioned.fill(
+                    child: pw.Image(pageImage, fit: pw.BoxFit.fill),
+                  ),
+                  ...overlays,
+                ],
+              ),
+            ),
+          );
+
+          pageFile = await _newManagedTempFile(
+            'searchable_page_$index',
+            extension: 'pdf',
+          );
+          await pageFile.writeAsBytes(
+            await singlePage.save(),
+            flush: true,
+          );
+        }
+
+        assemblerEngine ??= Pdf();
+        if (assembler == null) {
+          assembler = await assemblerEngine.edit(FileSource(pageFile));
+        } else {
+          await assembler.mergeFrom(FileSource(pageFile));
+        }
+        generatedPages++;
+        await secureDeleteTemporary(pageFile);
+      }
+
+      if (assembler == null || generatedPages == 0) {
+        throw StateError('No pages were generated.');
+      }
+
+      final sink = await FileSink.create(output);
+      try {
+        await assembler.save(sink);
+        await sink.close();
+      } catch (_) {
+        await sink.close();
+        try {
+          await output.delete();
+        } catch (_) {}
+        rethrow;
       }
 
       return output;
     } finally {
       await recognizer.close();
+      await assembler?.dispose();
+      await assemblerEngine?.dispose();
       await doc?.dispose();
       await engine.dispose();
-      for (final file in pageFiles) {
-        await secureDeleteTemporary(file);
-      }
     }
+  }
+
+  Future<File> makeSearchablePdf(
+    File source, {
+    TextRecognitionScript script = TextRecognitionScript.latin,
+    String? password,
+  }) {
+    if (script == TextRecognitionScript.latin) {
+      return _makeLatinSearchablePdfPreservingOriginal(
+        source,
+        password: password,
+      );
+    }
+    return _makeUnicodeSearchablePdf(
+      source,
+      script: script,
+      password: password,
+    );
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
