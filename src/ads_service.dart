@@ -20,22 +20,27 @@ class AdsService {
   static const _appOpenTestId =
       'ca-app-pub-3940256099942544/9257395921';
 
-  static const bannerId = String.fromEnvironment(
-    'ADMOB_BANNER_ID',
-    defaultValue: _bannerTestId,
-  );
-  static const interstitialId = String.fromEnvironment(
-    'ADMOB_INTERSTITIAL_ID',
-    defaultValue: _interstitialTestId,
-  );
-  static const rewardedId = String.fromEnvironment(
-    'ADMOB_REWARDED_ID',
-    defaultValue: _rewardedTestId,
-  );
-  static const appOpenId = String.fromEnvironment(
-    'ADMOB_APP_OPEN_ID',
-    defaultValue: _appOpenTestId,
-  );
+  static const _productionBannerId =
+      String.fromEnvironment('ADMOB_BANNER_ID');
+  static const _productionInterstitialId =
+      String.fromEnvironment('ADMOB_INTERSTITIAL_ID');
+  static const _productionRewardedId =
+      String.fromEnvironment('ADMOB_REWARDED_ID');
+  static const _productionAppOpenId =
+      String.fromEnvironment('ADMOB_APP_OPEN_ID');
+
+  static const bannerId = _productionBannerId == ''
+      ? _bannerTestId
+      : _productionBannerId;
+  static const interstitialId = _productionInterstitialId == ''
+      ? _interstitialTestId
+      : _productionInterstitialId;
+  static const rewardedId = _productionRewardedId == ''
+      ? _rewardedTestId
+      : _productionRewardedId;
+  static const appOpenId = _productionAppOpenId == ''
+      ? _appOpenTestId
+      : _productionAppOpenId;
 
   static const int _defaultInterstitialEvery =
       int.fromEnvironment('INTERSTITIAL_EVERY', defaultValue: 3);
@@ -80,6 +85,16 @@ class AdsService {
   }
 
 
+  bool get productionConfigured =>
+      _productionBannerId.isNotEmpty &&
+      _productionInterstitialId.isNotEmpty &&
+      _productionRewardedId.isNotEmpty &&
+      _productionAppOpenId.isNotEmpty &&
+      !usingTestIds;
+
+  bool get productionRevenueMode =>
+      kReleaseMode && productionConfigured;
+
   bool get usingTestIds =>
       bannerId == _bannerTestId ||
       interstitialId == _interstitialTestId ||
@@ -89,6 +104,13 @@ class AdsService {
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
+
+    if (kReleaseMode && !productionConfigured) {
+      debugPrint(
+        'AdMob disabled in release: production ad unit IDs are missing.',
+      );
+      return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     _sessionCount = (prefs.getInt(_sessionKey) ?? 0) + 1;
