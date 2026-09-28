@@ -1198,3 +1198,5 @@ class _ToolCard extends StatelessWidget {
 // Advanced scanner compile check
 
 // Clean advanced service rebuild trigger
+
+// Production hardening CI trigger
