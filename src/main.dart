@@ -155,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () => Navigator.pop(context, 'blackWhite'),
             ),
             ListTile(
-              leading: const Icon(Icons.magic_button_rounded),
+              leading: const Icon(Icons.auto_fix_high_rounded),
               title: const Text('Magic color'),
               onTap: () => Navigator.pop(context, 'magicColor'),
             ),
