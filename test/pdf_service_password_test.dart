@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf_manipulator/pdf_manipulator.dart';
+import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/pdf_service.dart';
 
 void main() {
