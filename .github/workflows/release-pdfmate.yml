@@ -108,11 +108,73 @@ jobs:
       - name: Configure Android release
         env:
           ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > buildapp/android/app/pdfmate-upload.jks
           python3 - <<'PY'
           import os
           from pathlib import Path
+
+          settings = Path("buildapp/android/settings.gradle.kts")
+          settings_text = settings.read_text()
+          loader = 'id("dev.flutter.flutter-plugin-loader") version "1.0.0"'
+          firebase_plugins = (
+              '\n    id("com.google.gms.google-services") version "4.5.0" apply false'
+              '\n    id("com.google.firebase.crashlytics") version "3.0.8" apply false'
+          )
+          if 'com.google.gms.google-services' not in settings_text:
+              settings_text = settings_text.replace(
+                  loader,
+                  loader + firebase_plugins,
+              )
+          settings.write_text(settings_text)
+
+          app_gradle = Path("buildapp/android/app/build.gradle.kts")
+          app_text = app_gradle.read_text()
+          flutter_plugin = 'id("dev.flutter.flutter-gradle-plugin")'
+          firebase_apply = (
+              '\n    id("com.google.gms.google-services")'
+              '\n    id("com.google.firebase.crashlytics")'
+          )
+          if 'com.google.gms.google-services' not in app_text:
+              app_text = app_text.replace(
+                  flutter_plugin,
+                  flutter_plugin + firebase_apply,
+              )
+          app_gradle.write_text(app_text)
+
+          import json
+          google_services = {
+              "project_info": {
+                  "project_number": os.environ["FIREBASE_MESSAGING_SENDER_ID"],
+                  "project_id": os.environ["FIREBASE_PROJECT_ID"],
+                  "storage_bucket": os.environ["FIREBASE_STORAGE_BUCKET"],
+              },
+              "client": [{
+                  "client_info": {
+                      "mobilesdk_app_id": os.environ["FIREBASE_APP_ID"],
+                      "android_client_info": {
+                          "package_name": "com.pdfmateapp.pdfmate",
+                      },
+                  },
+                  "api_key": [{
+                      "current_key": os.environ["FIREBASE_API_KEY"],
+                  }],
+                  "services": {
+                      "appinvite_service": {
+                          "other_platform_oauth_client": [],
+                      },
+                  },
+              }],
+              "configuration_version": "1",
+          }
+          Path("buildapp/android/app/google-services.json").write_text(
+              json.dumps(google_services, separators=(",", ":")),
+          )
 
           manifest = Path("buildapp/android/app/src/main/AndroidManifest.xml")
           s = manifest.read_text()
@@ -200,6 +262,16 @@ jobs:
           </layer-list>
           """)
           PY
+
+      - name: Verify Firebase Gradle configuration
+        shell: bash
+        run: |
+          grep -q 'com.google.gms.google-services' buildapp/android/settings.gradle.kts
+          grep -q 'com.google.firebase.crashlytics' buildapp/android/settings.gradle.kts
+          grep -q 'com.google.gms.google-services' buildapp/android/app/build.gradle.kts
+          grep -q 'com.google.firebase.crashlytics' buildapp/android/app/build.gradle.kts
+          test -s buildapp/android/app/google-services.json
+          python3 -m json.tool buildapp/android/app/google-services.json >/dev/null
 
       - name: Verify upload keystore and alias
         shell: bash
