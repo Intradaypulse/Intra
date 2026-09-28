@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:document_scan/document_scan.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -231,4 +232,139 @@ class PdfService {
       await recognizer.close();
     }
   }
+
+  Future<int?> selectedPdfPageCount() async {
+    final picked = await pickPdf();
+    if (picked == null) return null;
+    final sourceFile = await _materialize(picked);
+    final pdf = Pdf();
+    PdfDoc? doc;
+    try {
+      doc = await pdf.open(FileSource(sourceFile));
+      return doc.pageCount;
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+  Future<File?> deletePdfPages(List<int> zeroBasedPages) async {
+    final picked = await pickPdf();
+    if (picked == null || zeroBasedPages.isEmpty) return null;
+    final sourceFile = await _materialize(picked);
+    final outputFile = await _newFile('Pages_Deleted');
+    final pdf = Pdf();
+    final sink = await FileSink.create(outputFile);
+    try {
+      await pdf.deletePages(
+        FileSource(sourceFile),
+        sink,
+        pages: zeroBasedPages,
+      );
+      await sink.close();
+      return outputFile;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<File?> reorderPdfPages(List<int> zeroBasedOrder) async {
+    final picked = await pickPdf();
+    if (picked == null || zeroBasedOrder.isEmpty) return null;
+    final sourceFile = await _materialize(picked);
+    final outputFile = await _newFile('Reordered');
+    final pdf = Pdf();
+    final sink = await FileSink.create(outputFile);
+    try {
+      await pdf.reorderPages(
+        FileSource(sourceFile),
+        sink,
+        order: zeroBasedOrder,
+      );
+      await sink.close();
+      return outputFile;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
+  Future<List<File>> pdfToJpg() async {
+    final picked = await pickPdf();
+    if (picked == null) return const [];
+    final sourceFile = await _materialize(picked);
+    final pdf = Pdf();
+    PdfDoc? doc;
+    final outputs = <File>[];
+    try {
+      doc = await pdf.open(FileSource(sourceFile));
+      var pageNo = 1;
+      await for (final page in doc.render(
+        pages: const PdfPages.all(),
+        size: const PdfRenderSize.dpi(144),
+      )) {
+        final decoded = img.decodePng(page.data);
+        if (decoded == null) continue;
+        final jpgBytes = img.encodeJpg(decoded, quality: 88);
+        final dir = await _docs();
+        final path =
+            '${dir.path}/PDF_Page_${pageNo}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final file = File(path);
+        await file.writeAsBytes(jpgBytes, flush: true);
+        outputs.add(file);
+        pageNo++;
+      }
+      return outputs;
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+  Future<String?> extractPdfText() async {
+    final picked = await pickPdf();
+    if (picked == null) return null;
+    final sourceFile = await _materialize(picked);
+    final pdf = Pdf();
+    PdfDoc? doc;
+    try {
+      doc = await pdf.open(FileSource(sourceFile));
+      return await doc.extract(pages: const PdfPages.all());
+    } finally {
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+  Future<File?> addSignature(Uint8List signaturePng) async {
+    final picked = await pickPdf();
+    if (picked == null) return null;
+    final sourceFile = await _materialize(picked);
+    final outputFile = await _newFile('Signed');
+    final pdf = Pdf();
+    final sink = await FileSink.create(outputFile);
+    try {
+      await pdf.addImageStamp(
+        FileSource(sourceFile),
+        sink,
+        page: 0,
+        imageData: MemorySource(signaturePng),
+        rect: const PdfRect(x: 72, y: 72, width: 180, height: 80),
+        opacity: 1,
+      );
+      await sink.close();
+      return outputFile;
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
 }
