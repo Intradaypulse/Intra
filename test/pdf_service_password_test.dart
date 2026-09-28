@@ -158,6 +158,49 @@ void main() {
     }
   });
 
+  for (final script in <String, String>{
+    'Hindi': 'नमस्ते',
+    'Chinese': '世界',
+    'Japanese': 'こんにちは',
+    'Korean': '안녕하세요',
+  }.entries) {
+    test('native OCR overlay extracts ${script.key} text', () async {
+      final source = await createThreePagePdf();
+      final engine = Pdf();
+      final editor = await engine.edit(FileSource(source));
+      final output = File('${docs.path}/overlay_${script.key}.pdf');
+      final sink = await FileSink.create(output);
+      try {
+        await editor.addWatermark(
+          0,
+          script.value,
+          style: const PdfWatermarkStyle(opacity: 0.001, fontSize: 12),
+          position: const PdfWatermarkPosition.exact(
+            x: 40, y: 40, width: 300, height: 24,
+          ),
+          layer: PdfWatermarkLayer.background,
+        );
+        await editor.save(sink, options: const PdfSaveOptions.incremental());
+        await sink.close();
+      } finally {
+        await editor.dispose();
+        await engine.dispose();
+      }
+
+      final reader = Pdf();
+      PdfDoc? doc;
+      try {
+        doc = await reader.open(FileSource(output));
+        final extracted = await doc.extract(pages: const PdfPages.single(0));
+        expect(extracted, contains(script.value));
+        expect(extracted, contains('Regression page 1'));
+      } finally {
+        await doc?.dispose();
+        await reader.dispose();
+      }
+    });
+  }
+
   test('scanner temporary page files are deleted after PDF assembly', () async {
     final page = File('${temp.path}/pdfmate_scan_fixture.png');
     await page.writeAsBytes(const <int>[
@@ -171,6 +214,25 @@ void main() {
     final output = await service.createScannedPdfFromFiles([page.path]);
     expect(await output.exists(), isTrue);
     expect(await page.exists(), isFalse);
+  });
+
+  test('startup cleanup removes stale scanner pages but keeps fresh ones',
+      () async {
+    final stale = File('${temp.path}/pdfmate_scan_stale.jpg');
+    final fresh = File('${temp.path}/pdfmate_scan_fresh.jpg');
+    final unrelated = File('${temp.path}/unrelated.jpg');
+    for (final file in [stale, fresh, unrelated]) {
+      await file.writeAsBytes(List<int>.filled(128, 42));
+    }
+    await stale.setLastModified(
+      DateTime.now().subtract(const Duration(hours: 2)),
+    );
+
+    await service.cleanupStaleTemporaryFiles();
+
+    expect(await stale.exists(), isFalse);
+    expect(await fresh.exists(), isTrue);
+    expect(await unrelated.exists(), isTrue);
   });
 
 }
