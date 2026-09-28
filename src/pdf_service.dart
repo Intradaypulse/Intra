@@ -86,7 +86,7 @@ class PdfService {
           final zeros = Uint8List(chunkSize);
           var remaining = length;
           while (remaining > 0) {
-            final count = math.min(chunkSize, remaining);
+            final count = math.min(chunkSize, remaining).toInt();
             await handle.writeFrom(zeros, 0, count);
             remaining -= count;
           }
@@ -958,8 +958,6 @@ class PdfService {
     PdfDoc? doc;
     final recognizer = TextRecognizer(script: script);
     final texts = <String>[];
-    final tmp = await _tmp();
-
     try {
       doc = await pdf.open(FileSource(source), password: password);
       var index = 0;
@@ -1082,11 +1080,13 @@ class PdfService {
               pw.Positioned(
                 left: placement.left,
                 top: placement.top,
-                width: placement.width,
-                height: placement.height,
-                child: pw.Opacity(
-                  opacity: 0.01,
-                  child: textWidget,
+                child: pw.Container(
+                  width: placement.width,
+                  height: placement.height,
+                  child: pw.Opacity(
+                    opacity: 0.01,
+                    child: textWidget,
+                  ),
                 ),
               ),
             );
@@ -1197,8 +1197,24 @@ class PdfService {
 
   Future<String> savePdfToDownloads(File source) async {
     final rawName = source.uri.pathSegments.last;
-    final name = rawName.replaceFirst(
-      RegExp(r'\.pdf
+    final name = rawName.toLowerCase().endsWith('.pdf')
+        ? rawName.substring(0, rawName.length - 4)
+        : rawName;
+    final result = await FileSaver.instance.saveToDownloads(
+      name: name,
+      filePath: source.path,
+      fileExtension: 'pdf',
+      mimeType: MimeType.pdf,
+      subfolder: 'PDFMate',
+    );
+    if (result == null || result.trim().isEmpty) {
+      throw FileSystemException(
+        'Android did not confirm the Downloads copy.',
+        source.path,
+      );
+    }
+    return result;
+  }
 
   Future<String?> saveJpgToGallery(File source) async {
     final rawName = source.uri.pathSegments.last;
