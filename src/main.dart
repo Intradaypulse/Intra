@@ -33,6 +33,9 @@ Future<void> main() async {
   AdsService.instance.configureInterstitialFrequency(
     TelemetryService.instance.interstitialEvery,
   );
+  AdsService.instance.configureAppOpenEnabled(
+    TelemetryService.instance.appOpenEnabled,
+  );
   runApp(const PDFMateApp());
 }
 
