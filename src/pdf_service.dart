@@ -306,7 +306,7 @@ class PdfService {
       var pageNo = 1;
       await for (final page in doc.render(
         pages: const PdfPages.all(),
-        size: const PdfRenderSize.dpi(144),
+        size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
       )) {
         final decoded = img.decodePng(page.data);
         if (decoded == null) continue;
