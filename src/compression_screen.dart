@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
 
@@ -17,6 +18,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
   File? _source;
   CompressionPreset _preset = CompressionPreset.balanced;
   CompressionResult? _result;
+  String? _password;
   bool _busy = false;
 
   String _formatBytes(int bytes) {
@@ -27,13 +29,72 @@ class _CompressionScreenState extends State<CompressionScreen> {
     return '$bytes B';
   }
 
+  Future<String?> _askPassword({bool wrong = false}) async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(wrong ? 'Wrong password' : 'Protected PDF'),
+        content: TextField(
+          controller: controller,
+          obscureText: true,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'PDF password',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.pop(context, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Open'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+
   Future<void> _pick() async {
     final file = await widget.service.pickPdfFile();
     if (file == null) return;
-    setState(() {
-      _source = file;
-      _result = null;
-    });
+
+    String? password;
+    setState(() => _busy = true);
+    try {
+      while (true) {
+        try {
+          await widget.service.pageCount(file, password: password);
+          break;
+        } on PdfPasswordRequired {
+          if (!mounted) return;
+          final entered = await _askPassword();
+          if (entered == null) return;
+          password = entered;
+        } on PdfWrongPassword {
+          if (!mounted) return;
+          final entered = await _askPassword(wrong: true);
+          if (entered == null) return;
+          password = entered;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _source = file;
+        _password = password;
+        _result = null;
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _compress() async {
@@ -46,7 +107,11 @@ class _CompressionScreenState extends State<CompressionScreen> {
     });
 
     try {
-      final result = await widget.service.compressAdvanced(source, _preset);
+      final result = await widget.service.compressAdvanced(
+        source,
+        _preset,
+        password: _password,
+      );
       if (!mounted) return;
       setState(() => _result = result);
     } catch (e) {
