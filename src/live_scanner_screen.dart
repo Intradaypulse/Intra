@@ -39,6 +39,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   bool _autoCapture = true;
   bool _torch = false;
   bool _ready = false;
+  bool _finished = false;
   bool _handedOffPages = false;
   String _hint = 'Starting camera…';
   String? _error;
