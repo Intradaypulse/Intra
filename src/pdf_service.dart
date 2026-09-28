@@ -28,6 +28,18 @@ class PdfService {
   }
 
 
+
+  Future<Uri?> exportPdf(File source, String fileName) async {
+    return FilePicker.saveFile(
+      fileName: fileName,
+      bytes: await source.readAsBytes(),
+      mimeType: 'application/pdf',
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      dialogTitle: 'Save PDF',
+    );
+  }
+
   Future<Uint8List?> captureScannedPage({
     String filter = 'enhance',
   }) async {
