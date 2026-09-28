@@ -178,7 +178,7 @@ class AdsService {
         if (!completer.isCompleted) completer.complete();
       },
     );
-    ad.show(onUserEarnedReward: (_, __) => earned = true);
+    ad.show(onUserEarnedReward: (_, reward) => earned = true);
     await completer.future;
     return earned;
   }
