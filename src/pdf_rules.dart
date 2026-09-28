@@ -80,3 +80,5 @@ bool isPdfMateManagedTempPath(String path) {
   final name = normalized.split('/').last;
   return name.startsWith('pdfmate_secure_tmp_');
 }
+
+// Unicode overlay regression trigger.

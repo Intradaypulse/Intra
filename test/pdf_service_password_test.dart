@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
+import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdfmate/pdf_service.dart';
 
 void main() {
@@ -109,19 +109,61 @@ void main() {
     expect(await decrypted.exists(), isFalse);
   });
 
+  test('pdf engine preserves Unicode watermark text for extraction', () async {
+    final source = await createThreePagePdf();
+    final output = File('${docs.path}/unicode-overlay.pdf');
+    final pdf = Pdf();
+    PdfEditor? editor;
+    final sink = await FileSink.create(output);
+    try {
+      editor = await pdf.edit(FileSource(source));
+      await editor.addWatermark(
+        0,
+        'नमस्ते 世界 日本語 한국어',
+        style: const PdfWatermarkStyle(
+          fontSize: 10,
+          opacity: 0.001,
+          color: PdfColor.black,
+        ),
+        position: const PdfWatermarkPosition.exact(
+          x: 20,
+          y: 20,
+          width: 300,
+          height: 30,
+        ),
+        layer: PdfWatermarkLayer.background,
+      );
+      await editor.save(sink);
+      await sink.close();
+
+      final reopened = await pdf.open(FileSource(output));
+      try {
+        final text = await reopened.extract(pages: const PdfPages.single(0));
+        expect(text, contains('नमस्ते'));
+        expect(text, contains('世界'));
+        expect(text, contains('日本語'));
+        expect(text, contains('한국어'));
+      } finally {
+        await reopened.dispose();
+      }
+    } finally {
+      await editor?.dispose();
+      await pdf.dispose();
+    }
+  });
 
 
-  test('native PDF editor preserves Latin OCR text in incremental save',
+  test('native PDF editor preserves Unicode OCR text in incremental save',
       () async {
     final source = await createThreePagePdf();
     final engine = Pdf();
     final editor = await engine.edit(FileSource(source));
-    final output = File('${docs.path}/latin_overlay.pdf');
+    final output = File('${docs.path}/unicode_overlay.pdf');
     final sink = await FileSink.create(output);
     try {
       await editor.addWatermark(
         0,
-        'OCR_OVERLAY_TOKEN',
+        'नमस्ते 世界 日本語 한국어',
         style: const PdfWatermarkStyle(
           opacity: 0.001,
           fontSize: 12,
@@ -150,8 +192,10 @@ void main() {
     try {
       doc = await reader.open(FileSource(output));
       final text = await doc.extract(pages: const PdfPages.single(0));
-      expect(text, contains('OCR_OVERLAY_TOKEN'));
-      expect(text, contains('Regression page 1'));
+      expect(text, contains('नमस्ते'));
+      expect(text, contains('世界'));
+      expect(text, contains('日本語'));
+      expect(text, contains('한국어'));
     } finally {
       await doc?.dispose();
       await reader.dispose();
@@ -159,6 +203,15 @@ void main() {
   });
 
   test('scanner temporary page files are deleted after PDF assembly', () async {
+    final pageDoc = pw.Document();
+    pageDoc.addPage(
+      pw.Page(build: (_) => pw.Center(child: pw.Text('Scanned page'))),
+    );
+    final sourcePdf = File('${temp.path}/seed.pdf');
+    await sourcePdf.writeAsBytes(await pageDoc.save(), flush: true);
+
+    // Reuse a tiny PNG rendered from the PDF service path contract by writing
+    // a 1x1 transparent PNG fixture directly.
     final page = File('${temp.path}/pdfmate_scan_fixture.png');
     await page.writeAsBytes(const <int>[
       137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,

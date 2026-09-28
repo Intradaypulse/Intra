@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 class ScanTempSession {
   ScanTempSession({Future<void> Function(File file)? deleteFile})
@@ -10,8 +12,30 @@ class ScanTempSession {
 
   static Future<void> _defaultDelete(File file) async {
     try {
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
+      if (!await file.exists()) return;
+      final length = await file.length();
+      if (length > 0) {
+        final handle = await file.open(mode: FileMode.writeOnly);
+        try {
+          const chunkSize = 64 * 1024;
+          final zeros = Uint8List(chunkSize);
+          var remaining = length;
+          while (remaining > 0) {
+            final count = math.min(chunkSize, remaining).toInt();
+            await handle.writeFrom(zeros, 0, count);
+            remaining -= count;
+          }
+          await handle.flush();
+        } finally {
+          await handle.close();
+        }
+      }
+      await file.delete();
+    } catch (_) {
+      try {
+        if (await file.exists()) await file.delete();
+      } catch (_) {}
+    }
   }
 
   bool get handedOff => _handedOff;

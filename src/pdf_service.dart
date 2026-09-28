@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:document_scan/document_scan.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
-import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -15,7 +14,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:printing/printing.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'pdf_rules.dart';
 
@@ -991,59 +989,7 @@ class PdfService {
     }
   }
 
-  List<String> _androidSystemFontCandidates(
-    TextRecognitionScript script,
-  ) =>
-      switch (script) {
-        TextRecognitionScript.devanagiri => const [
-            '/system/fonts/NotoSansDevanagari-Regular.ttf',
-            '/system/fonts/NotoSansDevanagari-VF.ttf',
-            '/system/fonts/NotoSans-Regular.ttf',
-          ],
-        TextRecognitionScript.chinese => const [
-            '/system/fonts/NotoSansSC-Regular.ttf',
-            '/system/fonts/NotoSansCJK-Regular.ttc',
-            '/system/fonts/DroidSansFallback.ttf',
-          ],
-        TextRecognitionScript.japanese => const [
-            '/system/fonts/NotoSansJP-Regular.ttf',
-            '/system/fonts/NotoSansCJK-Regular.ttc',
-            '/system/fonts/DroidSansFallback.ttf',
-          ],
-        TextRecognitionScript.korean => const [
-            '/system/fonts/NotoSansKR-Regular.ttf',
-            '/system/fonts/NotoSansCJK-Regular.ttc',
-            '/system/fonts/DroidSansFallback.ttf',
-          ],
-        TextRecognitionScript.latin => const [
-            '/system/fonts/NotoSans-Regular.ttf',
-            '/system/fonts/Roboto-Regular.ttf',
-          ],
-      };
-
-  Future<pw.Font?> _androidSystemOcrFont(
-    TextRecognitionScript script,
-  ) async {
-    if (!Platform.isAndroid) return null;
-
-    for (final path in _androidSystemFontCandidates(script)) {
-      final file = File(path);
-      try {
-        if (!await file.exists()) continue;
-        final bytes = await file.readAsBytes();
-        if (bytes.isEmpty) continue;
-        return pw.Font.ttf(ByteData.sublistView(bytes));
-      } catch (_) {
-        // OEM font collections and formats vary. Try the next candidate.
-      }
-    }
-    return null;
-  }
-
   Future<pw.Font> _ocrOverlayFont(TextRecognitionScript script) async {
-    final systemFont = await _androidSystemOcrFont(script);
-    if (systemFont != null) return systemFont;
-
     try {
       return switch (script) {
         TextRecognitionScript.chinese =>
@@ -1062,9 +1008,9 @@ class PdfService {
         return pw.Font.helvetica();
       }
       throw StateError(
-        'A Unicode OCR font is unavailable on this Android build and could '
-        'not be downloaded. Connect once and retry so PDFMate can load the '
-        'Noto font. Details: $error',
+        'The Unicode OCR font could not be loaded. '
+        'Connect to the internet once so PDFMate can cache the Noto font, '
+        'then retry. Details: $error',
       );
     }
   }
@@ -1084,17 +1030,15 @@ class PdfService {
     }
   }
 
-  Future<File> _makeSearchablePdfPreservingOriginal(
+  Future<File> _makeLatinSearchablePdfPreservingOriginal(
     File source, {
-    required TextRecognitionScript script,
     String? password,
   }) async {
     final engine = Pdf();
     PdfDoc? doc;
     PdfEditor? editor;
-    final recognizer = TextRecognizer(script: script);
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     final output = await _newFile('Searchable');
-    final verification = <int, List<String>>{};
     var changed = false;
 
     try {
@@ -1102,7 +1046,8 @@ class PdfService {
       editor = await engine.edit(FileSource(source), password: password);
 
       for (var index = 0; index < doc.pageCount; index++) {
-        final existing = await doc.extract(pages: PdfPages.single(index));
+        final existing =
+            await doc.extract(pages: PdfPages.single(index));
         if (existing.trim().isNotEmpty) continue;
 
         Uint8List? pageBytes;
@@ -1119,7 +1064,7 @@ class PdfService {
         if (decoded == null) continue;
 
         final tempImage = await _newManagedTempFile(
-          'native_ocr_$index',
+          'latin_ocr_$index',
           extension: 'png',
         );
         await tempImage.writeAsBytes(pageBytes, flush: true);
@@ -1136,7 +1081,6 @@ class PdfService {
         final info = doc.pages[index];
         final pageWidth = info.effectiveWidth;
         final pageHeight = info.effectiveHeight;
-        final pageTokens = <String>[];
 
         for (final textBlock in recognized.blocks) {
           for (final line in textBlock.lines) {
@@ -1176,16 +1120,10 @@ class PdfService {
                 ),
                 layer: PdfWatermarkLayer.background,
               );
-
-              if (pageTokens.length < 3 && text.runes.length >= 2) {
-                pageTokens.add(text);
-              }
               changed = true;
             }
           }
         }
-
-        if (pageTokens.isNotEmpty) verification[index] = pageTokens;
       }
 
       if (!changed) {
@@ -1207,40 +1145,6 @@ class PdfService {
         } catch (_) {}
         rethrow;
       }
-
-      // The native editor preserves the original page objects, annotations,
-      // forms, bookmarks and vector content. Confirm that the invisible OCR
-      // text actually survives extraction for the selected script. If an OEM
-      // PDF engine cannot encode a script, the caller can fall back to the
-      // raster+embedded-font path instead of returning a broken searchable PDF.
-      if (verification.isNotEmpty) {
-        final verifier = Pdf();
-        PdfDoc? verifyDoc;
-        try {
-          verifyDoc = await verifier.open(FileSource(output));
-          for (final entry in verification.entries) {
-            final extracted = await verifyDoc.extract(
-              pages: PdfPages.single(entry.key),
-            );
-            final normalized = extracted.replaceAll(RegExp(r'\s+'), '');
-            final matched = entry.value.any(
-              (token) => normalized.contains(
-                token.replaceAll(RegExp(r'\s+'), ''),
-              ),
-            );
-            if (!matched) {
-              throw StateError(
-                'Native searchable-PDF text verification failed on '
-                'page ${entry.key + 1}.',
-              );
-            }
-          }
-        } finally {
-          await verifyDoc?.dispose();
-          await verifier.dispose();
-        }
-      }
-
       return output;
     } finally {
       await recognizer.close();
@@ -1469,28 +1373,60 @@ class PdfService {
     }
   }
 
+  Future<pw.Font> _ocrFontForScript(
+    TextRecognitionScript script,
+  ) async {
+    try {
+      return switch (script) {
+        TextRecognitionScript.devanagiri =>
+          await PdfGoogleFonts.notoSansDevanagariRegular(),
+        TextRecognitionScript.chinese =>
+          await PdfGoogleFonts.notoSansSCRegular(),
+        TextRecognitionScript.japanese =>
+          await PdfGoogleFonts.notoSansJPRegular(),
+        TextRecognitionScript.korean =>
+          await PdfGoogleFonts.notoSansKRRegular(),
+        _ => await PdfGoogleFonts.notoSansRegular(),
+      };
+    } catch (e) {
+      if (script == TextRecognitionScript.latin) {
+        return pw.Font.helvetica();
+      }
+      throw StateError(
+        'Unicode OCR font could not be loaded. Connect to the internet once '
+        'and retry so PDFMate can cache the required Noto font. Details: $e',
+      );
+    }
+  }
+
+  Future<bool> _allPagesAlreadySearchable(
+    PdfDoc doc, {
+    int minimumCharsPerPage = 3,
+  }) async {
+    if (doc.pageCount == 0) return false;
+    for (var i = 0; i < doc.pageCount; i++) {
+      final text = await doc.extract(pages: PdfPages.single(i));
+      if (text.trim().length < minimumCharsPerPage) return false;
+    }
+    return true;
+  }
+
   Future<File> makeSearchablePdf(
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
-  }) async {
-    try {
-      return await _makeSearchablePdfPreservingOriginal(
+  }) {
+    if (script == TextRecognitionScript.latin) {
+      return _makeLatinSearchablePdfPreservingOriginal(
         source,
-        script: script,
-        password: password,
-      );
-    } catch (_) {
-      // Some platform PDF engines cannot encode every Unicode script in an
-      // invisible text watermark. The fallback embeds an explicit Noto/system
-      // font so searchability still works, at the cost of rasterizing only
-      // pages that did not already contain text.
-      return _makeUnicodeSearchablePdf(
-        source,
-        script: script,
         password: password,
       );
     }
+    return _makeUnicodeSearchablePdf(
+      source,
+      script: script,
+      password: password,
+    );
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
@@ -1551,46 +1487,17 @@ class PdfService {
     }
   }
 
-  Future<T> _withLegacyStoragePermission<T>(
-    Future<T> Function() operation,
-  ) async {
-    try {
-      return await operation();
-    } on PlatformException catch (error) {
-      final details = '${error.code} ${error.message ?? ''}'.toLowerCase();
-      final legacyStorageDenied =
-          Platform.isAndroid &&
-          (details.contains('write_external_storage') ||
-              details.contains('read_external_storage') ||
-              details.contains('permission') && details.contains('storage'));
-
-      if (!legacyStorageDenied) rethrow;
-
-      final status = await Permission.storage.request();
-      if (!status.isGranted) {
-        throw FileSystemException(
-          'Storage permission is required on Android 9 and below to save '
-          'a shared Downloads/Gallery copy.',
-        );
-      }
-
-      return operation();
-    }
-  }
-
   Future<String> savePdfToDownloads(File source) async {
     final rawName = source.uri.pathSegments.last;
     final name = rawName.toLowerCase().endsWith('.pdf')
         ? rawName.substring(0, rawName.length - 4)
         : rawName;
-    final result = await _withLegacyStoragePermission(
-      () => FileSaver.instance.saveToDownloads(
-        name: name,
-        filePath: source.path,
-        fileExtension: 'pdf',
-        mimeType: MimeType.pdf,
-        subfolder: 'PDFMate',
-      ),
+    final result = await FileSaver.instance.saveToDownloads(
+      name: name,
+      filePath: source.path,
+      fileExtension: 'pdf',
+      mimeType: MimeType.pdf,
+      subfolder: 'PDFMate',
     );
     if (result == null || result.trim().isEmpty) {
       throw FileSystemException(
@@ -1607,15 +1514,13 @@ class PdfService {
       RegExp(r'\.(jpg|jpeg)$', caseSensitive: false),
       '',
     );
-    final result = await _withLegacyStoragePermission(
-      () => FileSaver.instance.saveToGallery(
-        name: name,
-        filePath: source.path,
-        fileExtension: 'jpg',
-        mimeType: MimeType.custom,
-        customMimeType: 'image/jpeg',
-        album: 'PDFMate',
-      ),
+    final result = await FileSaver.instance.saveToGallery(
+      name: name,
+      filePath: source.path,
+      fileExtension: 'jpg',
+      mimeType: MimeType.custom,
+      customMimeType: 'image/jpeg',
+      album: 'PDFMate',
     );
     if (result == null || result.trim().isEmpty) {
       throw FileSystemException(

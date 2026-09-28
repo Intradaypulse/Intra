@@ -31,7 +31,6 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: CompressionScreen(service: service)),
     );
-
     expect(find.text('Compress PDF'), findsOneWidget);
     expect(find.text('Choose a PDF'), findsOneWidget);
     expect(find.text('Compression level'), findsOneWidget);
@@ -41,7 +40,6 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: AdvancedSplitScreen(service: service)),
     );
-
     expect(find.text('Advanced split'), findsOneWidget);
     expect(find.text('Each page'), findsOneWidget);
     expect(find.text('Every N'), findsOneWidget);
@@ -52,7 +50,6 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: PageOrganizerScreen(service: service)),
     );
-
     expect(find.text('Page organizer'), findsOneWidget);
     expect(find.text('No PDF selected'), findsOneWidget);
     expect(find.text('Choose PDF'), findsOneWidget);

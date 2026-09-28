@@ -225,6 +225,7 @@ class _OcrScreenState extends State<OcrScreen> {
     final source = _source;
     if (source == null) return;
     if (!await _ensureLargeOcrUnlocked()) return;
+    if (!await _confirmSignedPdfModification()) return;
 
     setState(() {
       _busy = true;
@@ -290,7 +291,6 @@ class _OcrScreenState extends State<OcrScreen> {
     final source = _source;
     if (source == null) return;
     if (!await _ensureLargeOcrUnlocked()) return;
-    if (!await _confirmSignedPdfModification()) return;
 
     setState(() {
       _busy = true;
@@ -371,7 +371,7 @@ class _OcrScreenState extends State<OcrScreen> {
             Text(
               _script == TextRecognitionScript.latin
                   ? 'Recognition runs on-device. Latin searchable PDFs preserve the original PDF and add a word-level OCR layer.'
-                  : 'Recognition runs on-device. PDFMate first uses a compatible Android system Noto/Droid font when available, with Noto download fallback if the device does not provide one.',
+                  : 'Recognition runs on-device. Unicode searchable PDFs use a script-specific Noto font; the font may be downloaded and cached once on first use.',
             ),
             if (_hasDigitalSignatures) ...[
               const SizedBox(height: 8),
