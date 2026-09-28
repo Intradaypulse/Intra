@@ -205,7 +205,7 @@ jobs:
           gradle = Path("buildapp/android/app/build.gradle.kts")
           g = gradle.read_text()
           g = g.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36")
-          g = g.replace("minSdk = flutter.minSdkVersion", "minSdk = 23")
+          g = g.replace("minSdk = flutter.minSdkVersion", "minSdk = 24")
           g = g.replace("targetSdk = flutter.targetSdkVersion", "targetSdk = 36")
           g += """
           
