@@ -16,6 +16,7 @@ import 'pdf_to_jpg_screen.dart';
 import 'security_screen.dart';
 import 'settings_screen.dart';
 import 'settings_store.dart';
+import 'telemetry_service.dart';
 import 'signature_placement_screen.dart';
 import 'ads_service.dart';
 import 'file_store.dart';
@@ -28,6 +29,10 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
+  await TelemetryService.instance.initialize();
+  AdsService.instance.configureInterstitialFrequency(
+    TelemetryService.instance.interstitialEvery,
+  );
   runApp(const PDFMateApp());
 }
 
