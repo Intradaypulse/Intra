@@ -26,6 +26,12 @@ class TelemetryService {
 
   bool get enabled => _enabled;
 
+  bool get configurationPresent =>
+      _apiKey.isNotEmpty &&
+      _appId.isNotEmpty &&
+      _projectId.isNotEmpty &&
+      _senderId.isNotEmpty;
+
   int get interstitialEvery {
     if (!_enabled) return 3;
     final value = _remoteConfig?.getInt('interstitial_every') ?? 3;
@@ -45,10 +51,7 @@ class TelemetryService {
   Future<bool> initialize() async {
     if (_enabled) return true;
 
-    if (_apiKey.isEmpty ||
-        _appId.isEmpty ||
-        _projectId.isEmpty ||
-        _senderId.isEmpty) {
+    if (!configurationPresent) {
       debugPrint(
         'Firebase disabled: FIREBASE_* dart-defines are not configured.',
       );
