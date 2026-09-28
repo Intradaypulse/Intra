@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'ads_service.dart';
+import 'telemetry_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -113,11 +114,39 @@ class SettingsScreen extends StatelessWidget {
                         },
                 ),
                 const Divider(height: 1),
-                const ListTile(
-                  leading: Icon(Icons.ads_click_outlined),
-                  title: Text('Ad mode'),
+                ListTile(
+                  key: const ValueKey('settings_ad_mode'),
+                  leading: const Icon(Icons.ads_click_outlined),
+                  title: const Text('Ad mode'),
                   subtitle: Text(
-                    'Testing builds use Google test ad units. Production IDs are injected only for signed release builds.',
+                    AdsService.instance.productionRevenueMode
+                        ? 'Production AdMob is active.'
+                        : AdsService.instance.productionConfigured
+                            ? 'Production IDs configured; revenue activates in the signed release build.'
+                            : 'Test / disabled mode. Add all production AdMob IDs before release.',
+                  ),
+                  trailing: Icon(
+                    AdsService.instance.productionConfigured
+                        ? Icons.verified_rounded
+                        : Icons.warning_amber_rounded,
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  key: const ValueKey('settings_firebase_status'),
+                  leading: const Icon(Icons.monitor_heart_outlined),
+                  title: const Text('Firebase services'),
+                  subtitle: Text(
+                    TelemetryService.instance.enabled
+                        ? 'Analytics, Crashlytics and Remote Config are active.'
+                        : TelemetryService.instance.configurationPresent
+                            ? 'Firebase is configured but did not initialize in this session.'
+                            : 'Not configured. Production release requires Firebase project values.',
+                  ),
+                  trailing: Icon(
+                    TelemetryService.instance.enabled
+                        ? Icons.cloud_done_rounded
+                        : Icons.cloud_off_rounded,
                   ),
                 ),
               ],
