@@ -10,13 +10,13 @@ Configure these values under **GitHub repository → Settings → Secrets and va
 - `ANDROID_KEY_PASSWORD`
 
 ## AdMob
-- `ADMOB_APP_ID`
-- `ADMOB_BANNER_ID`
-- `ADMOB_INTERSTITIAL_ID`
-- `ADMOB_REWARDED_ID`
-- `ADMOB_APP_OPEN_ID`
+- `ADMOB_APP_ID` — `ca-app-pub-...~...`
+- `ADMOB_BANNER_ID` — `ca-app-pub-.../...`
+- `ADMOB_INTERSTITIAL_ID` — `ca-app-pub-.../...`
+- `ADMOB_REWARDED_ID` — `ca-app-pub-.../...`
+- `ADMOB_APP_OPEN_ID` — `ca-app-pub-.../...`
 
-The production workflow rejects Google's sample/test publisher IDs.
+The production workflow rejects Google's sample/test publisher IDs and malformed AdMob IDs.
 
 ## Firebase
 - `FIREBASE_API_KEY`
