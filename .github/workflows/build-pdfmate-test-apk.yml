@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "fullsrc/**"
       - ".github/workflows/build-pdfmate-test-apk.yml"
 
 permissions:
@@ -34,12 +35,14 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create Android project
+      - name: Restore full PDFMate source
         run: |
           flutter --version
-          flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
-          cp src/pubspec.yaml buildapp/pubspec.yaml
-          cp src/main.dart buildapp/lib/main.dart
+          mkdir -p buildapp
+          cat fullsrc/part*.b64 | base64 --decode > /tmp/pdfmate-core.tar.gz
+          tar -xzf /tmp/pdfmate-core.tar.gz -C buildapp
+          cd buildapp
+          flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate .
 
       - name: Configure Android manifest
         shell: bash
@@ -71,6 +74,10 @@ jobs:
       - name: Resolve packages
         working-directory: buildapp
         run: flutter pub get
+
+      - name: Analyze source
+        working-directory: buildapp
+        run: flutter analyze --no-fatal-infos
 
       - name: Build debug APK
         working-directory: buildapp
