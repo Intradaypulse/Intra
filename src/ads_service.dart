@@ -226,7 +226,6 @@ class AdsService {
 
   void _loadRewarded() {
     if (!_canRequestAds || _rewarded != null) return;
-    InterstitialAd? unused;
     RewardedAd.load(
       adUnitId: rewardedId,
       request: const AdRequest(),
