@@ -8,7 +8,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart';
+import 'package:pdf/pdf.dart' as pdfw;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
@@ -54,8 +54,17 @@ class PdfService {
 
 
   Future<String?> exportPdf(File source, String fileName) async {
-    final name = fileName.replaceFirst(
-      RegExp(r'\.pdf
+    final name = fileName.toLowerCase().endsWith('.pdf')
+        ? fileName.substring(0, fileName.length - 4)
+        : fileName;
+    return FileSaver.instance.saveAs(
+      name: name,
+      filePath: source.path,
+      fileExtension: 'pdf',
+      mimeType: MimeType.pdf,
+      dialogTitle: 'Save PDF',
+    );
+  }
 
   Future<Uint8List?> captureScannedPage({
     String filter = 'enhance',
@@ -908,7 +917,7 @@ class PdfService {
         final pageImage = pw.MemoryImage(page.data);
         outputDoc.addPage(
           pw.Page(
-            pageFormat: PdfPageFormat(info.width, info.height),
+            pageFormat: pdfw.PdfPageFormat(info.width, info.height),
             margin: pw.EdgeInsets.zero,
             build: (_) => pw.Stack(
               children: [
