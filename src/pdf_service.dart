@@ -748,4 +748,47 @@ class PdfService {
     }
   }
 
+
+  Future<List<File>> splitEveryN(
+    File source,
+    int every, {
+    String? password,
+  }) async {
+    if (every < 1) throw ArgumentError.value(every, 'every');
+    final count = await pageCount(source, password: password);
+    final chunks = (count / every).ceil();
+    final files = <File>[];
+    final sinks = <FileSink>[];
+
+    for (var i = 0; i < chunks; i++) {
+      final file = await _newFile(
+        every == 1 ? 'Page_${i + 1}' : 'Split_${i + 1}',
+      );
+      files.add(file);
+      sinks.add(await FileSink.create(file));
+    }
+
+    final pdf = Pdf();
+    try {
+      await pdf.split(
+        FileSource(source),
+        (index) => sinks[index],
+        every: every,
+      );
+      for (final sink in sinks) {
+        await sink.close();
+      }
+      return files;
+    } catch (_) {
+      for (final sink in sinks) {
+        try {
+          await sink.close();
+        } catch (_) {}
+      }
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
 }
