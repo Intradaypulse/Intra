@@ -42,30 +42,101 @@ jobs:
           cp src/*.dart buildapp/lib/
           rm -f buildapp/test/widget_test.dart
 
-      - name: Configure Android manifest
+      - name: Configure Android, branding and OCR models
         shell: bash
+        env:
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
         run: |
           python3 - <<'PY'
+          import os
           from pathlib import Path
-          p = Path("buildapp/android/app/src/main/AndroidManifest.xml")
-          s = p.read_text()
+
+          app_id = os.environ.get(
+              "ADMOB_APP_ID",
+              "",
+          ).strip() or "ca-app-pub-3940256099942544~3347511713"
+
+          manifest = Path("buildapp/android/app/src/main/AndroidManifest.xml")
+          s = manifest.read_text()
           if 'android.permission.CAMERA' not in s:
               s = s.replace(
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
                   '    <uses-permission android:name="android.permission.CAMERA"/>'
               )
+          s = s.replace('android:label="pdfmate"', 'android:label="PDFMate"')
+          s = s.replace(
+              'android:icon="@mipmap/ic_launcher"',
+              'android:icon="@drawable/pdfmate_launcher_icon" '
+              'android:roundIcon="@drawable/pdfmate_launcher_icon"'
+          )
           marker = '<application'
           pos = s.find(marker)
           app_open = s.find('>', pos)
           meta = (
               '\n        <meta-data\n'
               '            android:name="com.google.android.gms.ads.APPLICATION_ID"\n'
-              '            android:value="ca-app-pub-3940256099942544~3347511713"/>'
+              f'            android:value="{app_id}"/>'
           )
           if 'com.google.android.gms.ads.APPLICATION_ID' not in s:
               s = s[:app_open+1] + meta + s[app_open+1:]
-          p.write_text(s)
+          manifest.write_text(s)
+
+          gradle = Path("buildapp/android/app/build.gradle.kts")
+          g = gradle.read_text()
+          g = g.replace(
+              "compileSdk = flutter.compileSdkVersion",
+              "compileSdk = 36",
+          )
+          g = g.replace(
+              "minSdk = flutter.minSdkVersion",
+              "minSdk = 23",
+          )
+          g = g.replace(
+              "targetSdk = flutter.targetSdkVersion",
+              "targetSdk = 36",
+          )
+          g += """
+          \n
+          dependencies {
+              implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+              implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+          }
+          """
+          gradle.write_text(g)
+
+          drawable = Path("buildapp/android/app/src/main/res/drawable")
+          drawable.mkdir(parents=True, exist_ok=True)
+          (drawable / "pdfmate_launcher_icon.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#315EF5"
+                  android:pathData="M0,0h108v108h-108z"/>
+              <path android:fillColor="#FFFFFF"
+                  android:pathData="M28,15h34l18,18v60h-52z"/>
+              <path android:fillColor="#B9C7FF"
+                  android:pathData="M62,15v18h18z"/>
+              <path android:fillColor="#315EF5"
+                  android:pathData="M38,49h32v6h-32zM38,62h32v6h-32zM38,75h23v6h-23z"/>
+          </vector>
+          """)
+
+          launch = drawable / "launch_background.xml"
+          launch.write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="#315EF5"/>
+              <item
+                  android:width="108dp"
+                  android:height="108dp"
+                  android:gravity="center"
+                  android:drawable="@drawable/pdfmate_launcher_icon"/>
+          </layer-list>
+          """)
           PY
 
       - name: Resolve packages
@@ -78,7 +149,19 @@ jobs:
 
       - name: Build ARM64 debug APK
         working-directory: buildapp
-        run: flutter build apk --debug --target-platform android-arm64
+        env:
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID }}
+        shell: bash
+        run: |
+          defines=()
+          [[ -n "$ADMOB_BANNER_ID" ]] && defines+=(--dart-define=ADMOB_BANNER_ID="$ADMOB_BANNER_ID")
+          [[ -n "$ADMOB_INTERSTITIAL_ID" ]] && defines+=(--dart-define=ADMOB_INTERSTITIAL_ID="$ADMOB_INTERSTITIAL_ID")
+          [[ -n "$ADMOB_REWARDED_ID" ]] && defines+=(--dart-define=ADMOB_REWARDED_ID="$ADMOB_REWARDED_ID")
+          [[ -n "$ADMOB_APP_OPEN_ID" ]] && defines+=(--dart-define=ADMOB_APP_OPEN_ID="$ADMOB_APP_OPEN_ID")
+          flutter build apk --debug --target-platform android-arm64 "${defines[@]}"
 
       - name: Verify APK
         run: |
