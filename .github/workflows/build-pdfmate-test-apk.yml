@@ -44,6 +44,12 @@ jobs:
           cd buildapp
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate .
           rm -f test/widget_test.dart
+          if [ -f ../ci/pdfmate-test-debug.keystore.b64 ]; then
+            mkdir -p "$HOME/.android"
+            base64 --decode ../ci/pdfmate-test-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+            chmod 600 "$HOME/.android/debug.keystore"
+            keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
+          fi
 
       - name: Configure Android manifest
         shell: bash
@@ -82,21 +88,21 @@ jobs:
 
       - name: Build debug APK
         working-directory: buildapp
-        run: flutter build apk --debug
+        run: flutter build apk --debug --target-platform android-arm64
 
       - name: Verify APK
         run: |
           test -f buildapp/build/app/outputs/flutter-apk/app-debug.apk
-          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Test.apk
-          sha256sum PDFMate-Test.apk | tee PDFMate-Test.apk.sha256
-          ls -lh PDFMate-Test.apk
+          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Full-Beta-arm64.apk
+          sha256sum PDFMate-Full-Beta-arm64.apk | tee PDFMate-Full-Beta-arm64.apk.sha256
+          ls -lh PDFMate-Full-Beta-arm64.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Test-APK
+          name: PDFMate-Full-Beta-APK
           path: |
-            PDFMate-Test.apk
-            PDFMate-Test.apk.sha256
+            PDFMate-Full-Beta-arm64.apk
+            PDFMate-Full-Beta-arm64.apk.sha256
           if-no-files-found: error
           retention-days: 14
