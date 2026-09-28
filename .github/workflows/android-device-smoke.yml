@@ -19,7 +19,15 @@ concurrency:
 jobs:
   android-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 29
+            profile: pixel_2
+          - api: 35
+            profile: pixel_6
 
     steps:
       - name: Checkout
@@ -103,10 +111,10 @@ jobs:
       - name: Run Android native smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
-          profile: pixel_6
+          profile: ${{ matrix.profile }}
           disable-animations: true
           working-directory: buildapp
           script: flutter test integration_test/pdf_viewer_smoke_test.dart -d emulator-5554
