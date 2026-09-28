@@ -44,9 +44,9 @@ jobs:
           cd buildapp
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate .
           rm -f test/widget_test.dart
-          if [ -f ../ci/pdfmate-test-debug.keystore.b64 ]; then
+          if compgen -G "../ci/keypart_*" > /dev/null; then
             mkdir -p "$HOME/.android"
-            base64 --decode ../ci/pdfmate-test-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+            cat ../ci/keypart_* | base64 --decode > "$HOME/.android/debug.keystore"
             chmod 600 "$HOME/.android/debug.keystore"
             keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
           fi
