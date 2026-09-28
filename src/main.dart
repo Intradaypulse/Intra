@@ -130,7 +130,98 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _scan() => _runFileTask('Scan', _service.scanDocument);
+  Future<void> _scan() async {
+    final filter = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text('Scan style'),
+              subtitle: Text('Auto-crop and perspective correction are applied.'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('Enhance'),
+              onTap: () => Navigator.pop(context, 'enhance'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.contrast_rounded),
+              title: const Text('Black & white'),
+              onTap: () => Navigator.pop(context, 'blackWhite'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.magic_button_rounded),
+              title: const Text('Magic color'),
+              onTap: () => Navigator.pop(context, 'magicColor'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Original color'),
+              onTap: () => Navigator.pop(context, 'none'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (filter == null) return;
+
+    final pages = <Uint8List>[];
+    setState(() => _busy = true);
+    try {
+      while (true) {
+        final page = await _service.captureScannedPage(filter: filter);
+        if (page == null) break;
+        pages.add(page);
+        if (!mounted) return;
+        setState(() => _busy = false);
+        final addMore = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Page ${pages.length} captured'),
+            content: const Text('Add another page to this PDF?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Finish'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Add page'),
+              ),
+            ],
+          ),
+        );
+        if (addMore != true) break;
+        if (mounted) setState(() => _busy = true);
+      }
+
+      if (pages.isEmpty) return;
+      if (mounted) setState(() => _busy = true);
+      final output = await _service.createScannedPdf(pages);
+      await _register(output);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved ${pages.length}-page scan'),
+          action: SnackBarAction(
+            label: 'Open',
+            onPressed: () => _openPath(output.path, output.uri.pathSegments.last),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Scan failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   Future<void> _imagesToPdf() =>
       _runFileTask('Image to PDF', _service.imagesToPdf);
