@@ -239,7 +239,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       _tempSession.own(capturedPhotoPath);
 
       final detected = await _detector.detect(
-        ScanInput.file(capturedPhotoPath),
+        ScanInput.file(capturedPhotoPath!),
         sensitivity: DetectionSensitivity.lenient,
       );
 
@@ -247,7 +247,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       final result = await Navigator.of(context).push<ManualCropResult>(
         MaterialPageRoute(
           builder: (_) => ManualCropScreen(
-            imagePath: capturedPhotoPath,
+            imagePath: capturedPhotoPath!,
             initialCorners: detected,
           ),
         ),
