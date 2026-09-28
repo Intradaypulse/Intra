@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:document_scan/document_scan.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -14,6 +15,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:printing/printing.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'pdf_rules.dart';
 
@@ -1537,17 +1539,46 @@ class PdfService {
     }
   }
 
+  Future<T> _withLegacyStoragePermission<T>(
+    Future<T> Function() operation,
+  ) async {
+    try {
+      return await operation();
+    } on PlatformException catch (error) {
+      final details = '${error.code} ${error.message ?? ''}'.toLowerCase();
+      final legacyStorageDenied =
+          Platform.isAndroid &&
+          (details.contains('write_external_storage') ||
+              details.contains('read_external_storage') ||
+              details.contains('permission') && details.contains('storage'));
+
+      if (!legacyStorageDenied) rethrow;
+
+      final status = await Permission.storage.request();
+      if (!status.isGranted) {
+        throw FileSystemException(
+          'Storage permission is required on Android 9 and below to save '
+          'a shared Downloads/Gallery copy.',
+        );
+      }
+
+      return operation();
+    }
+  }
+
   Future<String> savePdfToDownloads(File source) async {
     final rawName = source.uri.pathSegments.last;
     final name = rawName.toLowerCase().endsWith('.pdf')
         ? rawName.substring(0, rawName.length - 4)
         : rawName;
-    final result = await FileSaver.instance.saveToDownloads(
-      name: name,
-      filePath: source.path,
-      fileExtension: 'pdf',
-      mimeType: MimeType.pdf,
-      subfolder: 'PDFMate',
+    final result = await _withLegacyStoragePermission(
+      () => FileSaver.instance.saveToDownloads(
+        name: name,
+        filePath: source.path,
+        fileExtension: 'pdf',
+        mimeType: MimeType.pdf,
+        subfolder: 'PDFMate',
+      ),
     );
     if (result == null || result.trim().isEmpty) {
       throw FileSystemException(
@@ -1564,13 +1595,15 @@ class PdfService {
       RegExp(r'\.(jpg|jpeg)$', caseSensitive: false),
       '',
     );
-    final result = await FileSaver.instance.saveToGallery(
-      name: name,
-      filePath: source.path,
-      fileExtension: 'jpg',
-      mimeType: MimeType.custom,
-      customMimeType: 'image/jpeg',
-      album: 'PDFMate',
+    final result = await _withLegacyStoragePermission(
+      () => FileSaver.instance.saveToGallery(
+        name: name,
+        filePath: source.path,
+        fileExtension: 'jpg',
+        mimeType: MimeType.custom,
+        customMimeType: 'image/jpeg',
+        album: 'PDFMate',
+      ),
     );
     if (result == null || result.trim().isEmpty) {
       throw FileSystemException(
