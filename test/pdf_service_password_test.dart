@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
@@ -159,7 +160,6 @@ void main() {
   });
 
   for (final script in <String, String>{
-    'Hindi': 'नमस्ते',
     'Chinese': '世界',
     'Japanese': 'こんにちは',
     'Korean': '안녕하세요',
@@ -200,6 +200,29 @@ void main() {
       }
     });
   }
+
+  test('bundled Hindi OCR font produces extractable PDF text', () async {
+    final fontBytes = await rootBundle.load(
+      'assets/fonts/NotoSansDevanagariOCR.ttf',
+    );
+    final document = pw.Document();
+    document.addPage(pw.Page(
+      build: (_) => pw.Text('नमस्ते',
+        style: pw.TextStyle(font: pw.Font.ttf(fontBytes))),
+    ));
+    final output = File('${docs.path}/embedded_hindi.pdf');
+    await output.writeAsBytes(await document.save());
+    final reader = Pdf();
+    PdfDoc? doc;
+    try {
+      doc = await reader.open(FileSource(output));
+      expect(await doc.extract(pages: const PdfPages.single(0)),
+        contains('नमस्ते'));
+    } finally {
+      await doc?.dispose();
+      await reader.dispose();
+    }
+  });
 
   test('scanner temporary page files are deleted after PDF assembly', () async {
     final page = File('${temp.path}/pdfmate_scan_fixture.png');
