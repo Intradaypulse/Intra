@@ -1,6 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
-import 'dart:typed_data';
+import 'dart:io' show File, Platform;
 
 import 'package:camera/camera.dart';
 import 'package:document_scan/document_scan.dart';
