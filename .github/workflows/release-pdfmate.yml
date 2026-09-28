@@ -72,6 +72,11 @@ jobs:
                   '    <uses-permission android:name="android.permission.CAMERA"/>'
               )
           s = s.replace('android:label="pdfmate"', 'android:label="PDFMate"')
+          s = s.replace(
+              'android:icon="@mipmap/ic_launcher"',
+              'android:icon="@drawable/pdfmate_launcher_icon" '
+              'android:roundIcon="@drawable/pdfmate_launcher_icon"'
+          )
           marker = '<application'
           pos = s.find(marker)
           app_open = s.find('>', pos)
@@ -89,6 +94,15 @@ jobs:
           g = g.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36")
           g = g.replace("minSdk = flutter.minSdkVersion", "minSdk = 23")
           g = g.replace("targetSdk = flutter.targetSdkVersion", "targetSdk = 36")
+          g += """
+          
+          dependencies {
+              implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+              implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+          }
+          """
           block = '''
               signingConfigs {
                   create("release") {
@@ -105,6 +119,35 @@ jobs:
               'signingConfig = signingConfigs.getByName("release")'
           )
           gradle.write_text(g)
+
+          drawable = Path("buildapp/android/app/src/main/res/drawable")
+          drawable.mkdir(parents=True, exist_ok=True)
+          (drawable / "pdfmate_launcher_icon.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#315EF5"
+                  android:pathData="M0,0h108v108h-108z"/>
+              <path android:fillColor="#FFFFFF"
+                  android:pathData="M28,15h34l18,18v60h-52z"/>
+              <path android:fillColor="#B9C7FF"
+                  android:pathData="M62,15v18h18z"/>
+              <path android:fillColor="#315EF5"
+                  android:pathData="M38,49h32v6h-32zM38,62h32v6h-32zM38,75h23v6h-23z"/>
+          </vector>
+          """)
+          (drawable / "launch_background.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="#315EF5"/>
+              <item
+                  android:width="108dp"
+                  android:height="108dp"
+                  android:gravity="center"
+                  android:drawable="@drawable/pdfmate_launcher_icon"/>
+          </layer-list>
+          """)
           PY
 
       - name: Resolve and analyze
