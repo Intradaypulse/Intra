@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:paper_document_scanner/paper_document_scanner.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'advanced_merge_screen.dart';
@@ -326,25 +327,46 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _scan() async {
-    final pages = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(builder: (_) => const LiveScannerScreen()),
-    );
-    if (pages == null || pages.isEmpty) return;
-
     setState(() => _busy = true);
     try {
-      final output = await _service.createScannedPdfFromFiles(pages);
+      final result = await PaperScanner.open(
+        context,
+        options: const PaperScannerOptions(
+          outputPdf: true,
+          minPages: 1,
+          maxPages: 0,
+        ),
+        style: const PaperScannerStyle(
+          accentColor: Color(0xFF315EF5),
+          overlayStrokeWidth: 4,
+          cornerHandleRadius: 16,
+          labels: PaperScannerLabels(
+            cropTitle: 'Adjust document edges',
+            keep: 'Keep page',
+            done: 'Finish scan',
+          ),
+        ),
+      );
+      if (!mounted || result == null || result.isEmpty) return;
+
+      final pdfPath = result.pdfPath;
+      if (pdfPath == null || pdfPath.isEmpty) {
+        throw StateError('Scanner did not return a PDF.');
+      }
+
+      final output = await _service.importPdfFile(
+        pdfPath,
+        prefix: 'Scan',
+      );
       await _register(output);
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Saved ${pages.length}-page scan'),
+          content: Text('Saved ${result.imagePaths.length}-page scan'),
           action: SnackBarAction(
             label: 'Open',
-            onPressed: () => _openPath(
-              output.path,
-              output.uri.pathSegments.last,
-            ),
+            onPressed: () => _openPath(output.path, output.uri.pathSegments.last),
           ),
         ),
       );
@@ -352,16 +374,10 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Scan failed: $e')),
+          SnackBar(content: Text('Advanced scan failed: $e')),
         );
       }
     } finally {
-      for (final path in pages) {
-        try {
-          final file = File(path);
-          if (await file.exists()) await file.delete();
-        } catch (_) {}
-      }
       if (mounted) setState(() => _busy = false);
     }
   }
