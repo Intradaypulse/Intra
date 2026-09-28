@@ -55,8 +55,9 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
   }
 
   Future<void> _pickAndConvert() async {
-    var file = await widget.service.pickPdfFile();
-    if (file == null) return;
+    final picked = await widget.service.pickPdfFile();
+    if (picked == null) return;
+    var file = picked;
 
     setState(() {
       _busy = true;
