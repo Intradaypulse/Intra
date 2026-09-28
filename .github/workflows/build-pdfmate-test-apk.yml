@@ -47,8 +47,9 @@ jobs:
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
           rm -f buildapp/test/widget_test.dart
-          mkdir -p buildapp/test
+          mkdir -p buildapp/test buildapp/integration_test
           if [ -d test ]; then cp -r test/. buildapp/test/; fi
+          if [ -d integration_test ]; then cp -r integration_test/. buildapp/integration_test/; fi
 
       - name: Configure Android, branding and OCR models
         shell: bash
@@ -218,3 +219,96 @@ jobs:
             PDFMate-RC-test-signed.aab.sha256
           if-no-files-found: error
           retention-days: 14
+
+
+  android-integration-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter 3.47.5
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.5"
+          cache: true
+
+      - name: Create integration-test Android project
+        run: |
+          flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
+          cp src/pubspec.yaml buildapp/pubspec.yaml
+          cp src/*.dart buildapp/lib/
+          rm -f buildapp/test/widget_test.dart
+          mkdir -p buildapp/integration_test
+          cp -r integration_test/. buildapp/integration_test/
+
+      - name: Configure Android test manifest and OCR models
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path("buildapp/android/app/src/main/AndroidManifest.xml")
+          s = manifest.read_text()
+          if 'android.permission.CAMERA' not in s:
+              s = s.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                  '    <uses-permission android:name="android.permission.CAMERA"/>'
+              )
+          marker = '<application'
+          pos = s.find(marker)
+          app_open = s.find('>', pos)
+          meta = (
+              '\n        <meta-data\n'
+              '            android:name="com.google.android.gms.ads.APPLICATION_ID"\n'
+              '            android:value="ca-app-pub-3940256099942544~3347511713"/>'
+          )
+          if 'com.google.android.gms.ads.APPLICATION_ID' not in s:
+              s = s[:app_open+1] + meta + s[app_open+1:]
+          manifest.write_text(s)
+
+          gradle = Path("buildapp/android/app/build.gradle.kts")
+          g = gradle.read_text()
+          g = g.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36")
+          g = g.replace("minSdk = flutter.minSdkVersion", "minSdk = 24")
+          g = g.replace("targetSdk = flutter.targetSdkVersion", "targetSdk = 36")
+          g += """
+          
+          dependencies {
+              implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+              implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+              implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+          }
+          """
+          gradle.write_text(g)
+          PY
+
+      - name: Resolve packages
+        working-directory: buildapp
+        run: flutter pub get
+
+      - name: Android emulator app smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
+          script: cd buildapp && flutter test integration_test/app_smoke_test.dart -d emulator-5554
