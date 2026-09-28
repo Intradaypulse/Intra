@@ -41,6 +41,8 @@ jobs:
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
           rm -f buildapp/test/widget_test.dart
+          mkdir -p buildapp/test
+          if [ -d test ]; then cp -r test/. buildapp/test/; fi
 
       - name: Configure Android, branding and OCR models
         shell: bash
@@ -146,6 +148,10 @@ jobs:
       - name: Analyze source
         working-directory: buildapp
         run: flutter analyze --no-fatal-infos
+
+      - name: Run regression tests
+        working-directory: buildapp
+        run: flutter test
 
       - name: Build ARM64 debug APK
         working-directory: buildapp
