@@ -38,4 +38,21 @@ void main() {
 
     expect(deleted, ['/tmp/page.jpg']);
   });
+
+  test('default scanner cleanup deletes a real owned temp file', () async {
+    final dir = await Directory.systemTemp.createTemp('pdfmate_scan_secure_');
+    addTearDown(() async {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    });
+
+    final file = File('${dir.path}/capture.jpg');
+    await file.writeAsBytes(List<int>.generate(8192, (i) => i % 251));
+    expect(await file.exists(), isTrue);
+
+    final session = ScanTempSession();
+    session.own(file.path);
+    await session.cleanupOwned();
+
+    expect(await file.exists(), isFalse);
+  });
 }
