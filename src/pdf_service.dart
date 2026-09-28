@@ -938,4 +938,31 @@ class PdfService {
     }
   }
 
+
+  Future<File> decryptToTemporary(File source, String password) async {
+    final dir = await getTemporaryDirectory();
+    final output = File(
+      '${dir.path}/pdfmate_view_${DateTime.now().microsecondsSinceEpoch}.pdf',
+    );
+    final pdf = Pdf();
+    final sink = await FileSink.create(output);
+    try {
+      await pdf.decrypt(
+        FileSource(source),
+        sink,
+        password: password,
+      );
+      await sink.close();
+      return output;
+    } catch (_) {
+      await sink.close();
+      try {
+        await output.delete();
+      } catch (_) {}
+      rethrow;
+    } finally {
+      await pdf.dispose();
+    }
+  }
+
 }
