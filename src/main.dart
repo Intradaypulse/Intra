@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -206,6 +207,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_service.cleanupStaleTemporaryFiles());
     _loadFiles();
     _search.addListener(() => setState(() {}));
     _initializeAds();
@@ -284,6 +286,69 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadFiles();
   }
 
+  Future<void> _showDownloadsFailure(
+    File file,
+    Object error, {
+    bool automatic = true,
+  }) async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        content: Text(
+          automatic
+              ? 'PDF is safe inside PDFMate, but the Downloads backup failed. '
+                  'Retry to create the external copy.'
+              : 'Could not save the PDF to Downloads: $error',
+        ),
+        actions: [
+          TextButton(
+            onPressed: messenger.hideCurrentMaterialBanner,
+            child: const Text('DISMISS'),
+          ),
+          FilledButton.tonal(
+            onPressed: () async {
+              try {
+                await _service.savePdfToDownloads(file);
+                if (!mounted) return;
+                messenger.hideCurrentMaterialBanner();
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Saved copy to Download/PDFMate'),
+                  ),
+                );
+              } catch (retryError) {
+                if (!mounted) return;
+                messenger.hideCurrentMaterialBanner();
+                unawaited(
+                  _showDownloadsFailure(
+                    file,
+                    retryError,
+                    automatic: false,
+                  ),
+                );
+              }
+            },
+            child: const Text('RETRY'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveCopyToDownloads(File file) async {
+    try {
+      await _service.savePdfToDownloads(file);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved copy to Download/PDFMate')),
+      );
+    } catch (error) {
+      await _showDownloadsFailure(file, error, automatic: false);
+    }
+  }
+
   Future<void> _register(File file) async {
     final record = PdfRecord(
       path: file.path,
@@ -295,8 +360,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (widget.autoSaveDownloads) {
       try {
         await _service.savePdfToDownloads(file);
-      } catch (_) {
-        // Keep the internal copy even if public Downloads export is unavailable.
+      } catch (error) {
+        await _showDownloadsFailure(file, error);
       }
     }
 
@@ -996,30 +1061,9 @@ class _HomeScreenState extends State<HomeScreen> {
                               }
                               if (value == 'share') _share(item);
                               if (value == 'downloads') {
-                                _service
-                                    .savePdfToDownloads(File(item.path))
-                                    .then((_) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Saved a copy to Download/PDFMate',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                }).catchError((error) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Downloads save failed: $error',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                  return null;
-                                });
+                                unawaited(
+                                  _saveCopyToDownloads(File(item.path)),
+                                );
                               }
                               if (value == 'export') _export(item);
                               if (value == 'rename') _rename(item);
