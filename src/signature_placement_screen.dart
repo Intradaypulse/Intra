@@ -71,8 +71,9 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   }
 
   Future<void> _pickPdf() async {
-    var file = await widget.service.pickPdfFile();
-    if (file == null) return;
+    final picked = await widget.service.pickPdfFile();
+    if (picked == null) return;
+    var file = picked;
 
     setState(() {
       _busy = true;
