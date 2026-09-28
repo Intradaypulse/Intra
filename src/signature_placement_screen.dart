@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -71,7 +72,11 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   }
 
   Future<void> _pickPdf() async {
+    final previous = _source;
     final picked = await widget.service.pickPdfFile();
+    if (picked != null && previous != null && previous.path != picked.path) {
+      await widget.service.secureDeleteTemporary(previous);
+    }
     if (picked == null) return;
     var file = picked;
 
@@ -93,7 +98,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
           final password = await _askPassword();
           if (password == null) return;
           try {
-            file = await widget.service.unlockPdf(file, password);
+            file = await widget.service.decryptToTemporary(file, password);
           } on PdfWrongPassword {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -236,6 +241,12 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  @override
+  void dispose() {
+    unawaited(widget.service.secureDeleteTemporary(_source));
+    super.dispose();
   }
 
   @override
