@@ -44,12 +44,6 @@ jobs:
           cd buildapp
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate .
           rm -f test/widget_test.dart
-          if compgen -G "../ci/keypart_*" > /dev/null; then
-            mkdir -p "$HOME/.android"
-            cat ../ci/keypart_* | base64 --decode > "$HOME/.android/debug.keystore"
-            chmod 600 "$HOME/.android/debug.keystore"
-            keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
-          fi
 
       - name: Configure Android manifest
         shell: bash
