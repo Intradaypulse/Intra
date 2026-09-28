@@ -989,7 +989,59 @@ class PdfService {
     }
   }
 
+  List<String> _androidSystemFontCandidates(
+    TextRecognitionScript script,
+  ) =>
+      switch (script) {
+        TextRecognitionScript.devanagiri => const [
+            '/system/fonts/NotoSansDevanagari-Regular.ttf',
+            '/system/fonts/NotoSansDevanagari-VF.ttf',
+            '/system/fonts/NotoSans-Regular.ttf',
+          ],
+        TextRecognitionScript.chinese => const [
+            '/system/fonts/NotoSansSC-Regular.ttf',
+            '/system/fonts/NotoSansCJK-Regular.ttc',
+            '/system/fonts/DroidSansFallback.ttf',
+          ],
+        TextRecognitionScript.japanese => const [
+            '/system/fonts/NotoSansJP-Regular.ttf',
+            '/system/fonts/NotoSansCJK-Regular.ttc',
+            '/system/fonts/DroidSansFallback.ttf',
+          ],
+        TextRecognitionScript.korean => const [
+            '/system/fonts/NotoSansKR-Regular.ttf',
+            '/system/fonts/NotoSansCJK-Regular.ttc',
+            '/system/fonts/DroidSansFallback.ttf',
+          ],
+        TextRecognitionScript.latin => const [
+            '/system/fonts/NotoSans-Regular.ttf',
+            '/system/fonts/Roboto-Regular.ttf',
+          ],
+      };
+
+  Future<pw.Font?> _androidSystemOcrFont(
+    TextRecognitionScript script,
+  ) async {
+    if (!Platform.isAndroid) return null;
+
+    for (final path in _androidSystemFontCandidates(script)) {
+      final file = File(path);
+      try {
+        if (!await file.exists()) continue;
+        final bytes = await file.readAsBytes();
+        if (bytes.isEmpty) continue;
+        return pw.Font.ttf(ByteData.sublistView(bytes));
+      } catch (_) {
+        // OEM font collections and formats vary. Try the next candidate.
+      }
+    }
+    return null;
+  }
+
   Future<pw.Font> _ocrOverlayFont(TextRecognitionScript script) async {
+    final systemFont = await _androidSystemOcrFont(script);
+    if (systemFont != null) return systemFont;
+
     try {
       return switch (script) {
         TextRecognitionScript.chinese =>
@@ -1008,9 +1060,9 @@ class PdfService {
         return pw.Font.helvetica();
       }
       throw StateError(
-        'The Unicode OCR font could not be loaded. '
-        'Connect to the internet once so PDFMate can cache the Noto font, '
-        'then retry. Details: $error',
+        'A Unicode OCR font is unavailable on this Android build and could '
+        'not be downloaded. Connect once and retry so PDFMate can load the '
+        'Noto font. Details: $error',
       );
     }
   }
