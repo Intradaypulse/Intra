@@ -6,13 +6,14 @@ import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdfmate/live_scanner_screen.dart';
 import 'package:pdfmate/main.dart' as app;
 import 'package:pdfmate/pdf_service.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('app boots onboarding home settings and lifecycle', (tester) async {
+  testWidgets('app boots, settings and camera lifecycle work', (tester) async {
     await app.main();
     await tester.pumpAndSettle(const Duration(seconds: 2));
 
@@ -36,29 +37,50 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Settings'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Scan document'));
+    await tester.pump(const Duration(seconds: 4));
+    expect(find.byType(LiveScannerScreen), findsOneWidget);
+    expect(find.text('Auto'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('PDFMate Beta'), findsOneWidget);
   });
 
-  testWidgets('Android Downloads and Gallery writes succeed', (tester) async {
+  testWidgets('Android scoped-storage exports return confirmed destinations',
+      (tester) async {
     final service = PdfService();
-    final temp = await getTemporaryDirectory();
+    final tmp = await getTemporaryDirectory();
 
-    final pdfFile = File('${temp.path}/pdfmate_storage_smoke.pdf');
-    final doc = pw.Document();
-    doc.addPage(
+    final pdfFile = File(
+      '${tmp.path}/pdfmate_integration_${DateTime.now().microsecondsSinceEpoch}.pdf',
+    );
+    final pdf = pw.Document();
+    pdf.addPage(
       pw.Page(
-        build: (_) => pw.Center(child: pw.Text('PDFMate storage smoke')),
+        build: (_) => pw.Center(child: pw.Text('PDFMate integration export')),
       ),
     );
-    await pdfFile.writeAsBytes(await doc.save(), flush: true);
+    await pdfFile.writeAsBytes(await pdf.save(), flush: true);
 
-    final downloadsResult = await service.savePdfToDownloads(pdfFile);
-    expect(downloadsResult, isNotEmpty);
+    final bitmap = img.Image(width: 16, height: 16);
+    final jpgFile = File(
+      '${tmp.path}/pdfmate_integration_${DateTime.now().microsecondsSinceEpoch}.jpg',
+    );
+    await jpgFile.writeAsBytes(img.encodeJpg(bitmap), flush: true);
 
-    final jpgFile = File('${temp.path}/pdfmate_storage_smoke.jpg');
-    final image = img.Image(width: 32, height: 32);
-    await jpgFile.writeAsBytes(img.encodeJpg(image), flush: true);
+    try {
+      final download = await service.savePdfToDownloads(pdfFile);
+      final gallery = await service.saveJpgToGallery(jpgFile);
 
-    final galleryResult = await service.saveJpgToGallery(jpgFile);
-    expect(galleryResult, isNotEmpty);
+      expect(download.trim(), isNotEmpty);
+      expect(gallery.trim(), isNotEmpty);
+    } finally {
+      if (await pdfFile.exists()) await pdfFile.delete();
+      if (await jpgFile.exists()) await jpgFile.delete();
+    }
   });
 }
