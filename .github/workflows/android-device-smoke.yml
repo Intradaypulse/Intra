@@ -121,4 +121,7 @@ jobs:
           profile: ${{ matrix.profile }}
           disable-animations: true
           working-directory: buildapp
-          script: flutter test integration_test/pdf_viewer_smoke_test.dart -d emulator-5554
+          script: |
+            flutter build apk --debug
+            adb install -r -g build/app/outputs/flutter-apk/app-debug.apk
+            flutter test integration_test/pdf_viewer_smoke_test.dart -d emulator-5554
