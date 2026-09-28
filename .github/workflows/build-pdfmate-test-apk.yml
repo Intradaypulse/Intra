@@ -299,6 +299,10 @@ jobs:
         working-directory: buildapp
         run: flutter pub get
 
+      - name: Build integration-test APK
+        working-directory: buildapp
+        run: flutter build apk --debug --target-platform android-x64 --target integration_test/app_smoke_test.dart
+
       - name: Android emulator app smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -311,6 +315,7 @@ jobs:
           script: |
             mkdir -p device-logs
             adb logcat -c
+            adb install -r -g buildapp/build/app/outputs/flutter-apk/app-debug.apk
             cd buildapp && timeout 15m flutter test integration_test/app_smoke_test.dart -d emulator-5554 --reporter expanded > ../device-logs/flutter-test.log 2>&1; result=$?; cat ../device-logs/flutter-test.log; adb logcat -d -v threadtime > ../device-logs/logcat.txt; adb shell dumpsys activity activities > ../device-logs/activities.txt; exit $result
 
       - name: Upload Android test diagnostics
