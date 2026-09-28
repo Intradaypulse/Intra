@@ -7,6 +7,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
@@ -812,6 +813,128 @@ class PdfService {
     } finally {
       await doc?.dispose();
       await pdf.dispose();
+    }
+  }
+
+
+  Future<List<String>> ocrPdf(
+    File source, {
+    TextRecognitionScript script = TextRecognitionScript.latin,
+    String? password,
+  }) async {
+    final pdf = Pdf();
+    PdfDoc? doc;
+    final recognizer = TextRecognizer(script: script);
+    final texts = <String>[];
+    final tmp = await getTemporaryDirectory();
+
+    try {
+      doc = await pdf.open(FileSource(source), password: password);
+      var index = 0;
+      await for (final page in doc.render(
+        pages: const PdfPages.all(),
+        size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500),
+      )) {
+        final file = File(
+          '${tmp.path}/pdfmate_ocr_${DateTime.now().microsecondsSinceEpoch}_$index.png',
+        );
+        await file.writeAsBytes(page.data, flush: true);
+        try {
+          final result = await recognizer.processImage(
+            InputImage.fromFilePath(file.path),
+          );
+          texts.add(result.text);
+        } finally {
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+        index++;
+      }
+      return texts;
+    } finally {
+      await recognizer.close();
+      await doc?.dispose();
+      await pdf.dispose();
+    }
+  }
+
+  Future<File> makeSearchablePdf(
+    File source, {
+    TextRecognitionScript script = TextRecognitionScript.latin,
+    String? password,
+  }) async {
+    final engine = Pdf();
+    PdfDoc? doc;
+    final recognizer = TextRecognizer(script: script);
+    final tmp = await getTemporaryDirectory();
+    final outputDoc = pw.Document();
+
+    try {
+      doc = await engine.open(FileSource(source), password: password);
+      var index = 0;
+
+      await for (final page in doc.render(
+        pages: const PdfPages.all(),
+        size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
+      )) {
+        final tempImage = File(
+          '${tmp.path}/pdfmate_searchable_${DateTime.now().microsecondsSinceEpoch}_$index.png',
+        );
+        await tempImage.writeAsBytes(page.data, flush: true);
+
+        String text = '';
+        try {
+          final result = await recognizer.processImage(
+            InputImage.fromFilePath(tempImage.path),
+          );
+          text = result.text;
+        } finally {
+          try {
+            await tempImage.delete();
+          } catch (_) {}
+        }
+
+        final info = doc.pages[index];
+        final pageImage = pw.MemoryImage(page.data);
+        outputDoc.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat(info.width, info.height),
+            margin: pw.EdgeInsets.zero,
+            build: (_) => pw.Stack(
+              children: [
+                pw.Positioned.fill(
+                  child: pw.Image(pageImage, fit: pw.BoxFit.fill),
+                ),
+                // Invisible OCR text layer: keeps the raster visually unchanged
+                // while making recognized content searchable/selectable.
+                if (text.trim().isNotEmpty)
+                  pw.Positioned(
+                    left: 1,
+                    right: 1,
+                    bottom: 1,
+                    child: pw.Opacity(
+                      opacity: 0.0,
+                      child: pw.Text(
+                        text,
+                        style: const pw.TextStyle(fontSize: 1),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+        index++;
+      }
+
+      final output = await _newFile('Searchable');
+      await output.writeAsBytes(await outputDoc.save(), flush: true);
+      return output;
+    } finally {
+      await recognizer.close();
+      await doc?.dispose();
+      await engine.dispose();
     }
   }
 
