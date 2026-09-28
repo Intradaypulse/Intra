@@ -443,3 +443,5 @@ class _ToolCard extends StatelessWidget {
 // Trigger stable signed ARM64 beta build
 
 // Retry stable signed ARM64 beta after key chunk repair
+
+// Trigger functional ARM64 full beta
