@@ -72,6 +72,7 @@ class PdfService {
   final Future<Directory> Function() _documentsDirectoryProvider;
   final Future<Directory> Function() _temporaryDirectoryProvider;
   final Set<String> _managedTemporaryPaths = <String>{};
+  static final Set<String> _activeTemporaryPaths = <String>{};
 
   final ImagePicker imagePicker = ImagePicker();
 
@@ -88,16 +89,17 @@ class PdfService {
       '${DateTime.now().microsecondsSinceEpoch}.$extension',
     );
     _managedTemporaryPaths.add(file.path);
+    _activeTemporaryPaths.add(file.path);
     return file;
   }
 
   bool isManagedTemporaryFile(File file) =>
-      _managedTemporaryPaths.contains(file.path) ||
-      isPdfMateManagedTempPath(file.path);
+      _managedTemporaryPaths.contains(file.path);
 
   Future<void> secureDeleteTemporary(File? file) async {
     if (file == null || !isManagedTemporaryFile(file)) return;
     _managedTemporaryPaths.remove(file.path);
+    _activeTemporaryPaths.remove(file.path);
     try {
       if (!await file.exists()) return;
       final length = await file.length();
@@ -130,7 +132,8 @@ class PdfService {
     if (!await dir.exists()) return;
     await for (final entity in dir.list(followLinks: false)) {
       if (entity is! File) continue;
-      if (isPdfMateManagedTempPath(entity.path)) {
+      if (isPdfMateManagedTempPath(entity.path) &&
+          !_activeTemporaryPaths.contains(entity.path)) {
         _managedTemporaryPaths.add(entity.path);
         await secureDeleteTemporary(entity);
       } else if (_isScanPageInTemp(entity, dir)) {

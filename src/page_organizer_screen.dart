@@ -87,27 +87,28 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
   }
 
   Future<void> _pick() async {
-    final file = await widget.service.pickPdfFile();
-    if (file == null) return;
-
+    if (_busy) return;
     setState(() {
       _busy = true;
       _status = 'Reading page index…';
-      _pages.clear();
-      _thumbCache.clear();
-      _source = file;
-      _password = null;
     });
-
+    File? candidate;
     try {
-      while (true) {
+      candidate = await widget.service.pickPdfFile();
+      if (candidate == null || !mounted) return;
+      String? password;
+      while (mounted) {
         try {
           final count = await widget.service.pageCount(
-            file,
-            password: _password,
+            candidate,
+            password: password,
           );
           if (!mounted) return;
+          final previous = _source;
           setState(() {
+            _source = candidate;
+            _password = password;
+            _thumbCache.clear();
             _pages
               ..clear()
               ..addAll([
@@ -115,20 +116,21 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
               ]);
             _status = '$count page(s) — thumbnails load only when visible.';
           });
-          break;
+          if (previous?.path != candidate.path) {
+            await widget.service.secureDeleteTemporary(previous);
+          }
+          return;
         } on PdfPasswordRequired {
           if (!mounted) return;
-          final password = await _askPassword();
+          password = await _askPassword();
           if (password == null) return;
-          _password = password;
         } on PdfWrongPassword {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Wrong password. Try again.')),
           );
-          final password = await _askPassword();
+          password = await _askPassword();
           if (password == null) return;
-          _password = password;
         }
       }
     } catch (e) {
@@ -139,6 +141,9 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
         ).showSnackBar(SnackBar(content: Text('Open failed: $e')));
       }
     } finally {
+      if (_source?.path != candidate?.path || !mounted) {
+        await widget.service.secureDeleteTemporary(candidate);
+      }
       if (mounted) setState(() => _busy = false);
     }
   }

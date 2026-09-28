@@ -297,7 +297,12 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
         final file = File(
           '${dir.path}/pdfmate_scan_${DateTime.now().microsecondsSinceEpoch}.jpg',
         );
-        await file.writeAsBytes(result.bytes, flush: true);
+        try {
+          await file.writeAsBytes(result.bytes, flush: true);
+        } catch (_) {
+          await _tempSession.deletePath(file.path);
+          rethrow;
+        }
         _tempSession.own(file.path);
         if (!mounted) return;
         setState(() {

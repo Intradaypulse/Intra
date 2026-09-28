@@ -108,6 +108,37 @@ void main() {
     },
   );
 
+  test(
+    'startup cleanup preserves a temporary document owned by another active service',
+    () async {
+      final source = await createThreePagePdf();
+      final protected = await service.protectPdfAdvanced(
+        source,
+        ownerPassword: 'owner',
+        userPassword: 'reader',
+      );
+      final readable = await service.decryptToTemporary(protected, 'reader');
+      final other = PdfService(
+        documentsDirectoryProvider: () async => docs,
+        temporaryDirectoryProvider: () async => temp,
+      );
+      await other.cleanupStaleTemporaryFiles();
+      expect(await readable.exists(), isTrue);
+      await service.secureDeleteTemporary(readable);
+    },
+  );
+
+  test(
+    'a user document with the temporary prefix is never deleted by name alone',
+    () async {
+      final original = await File(
+        '${docs.path}/pdfmate_secure_tmp_my_original.pdf',
+      ).writeAsString('original');
+      await service.secureDeleteTemporary(original);
+      expect(await original.readAsString(), 'original');
+    },
+  );
+
   test('managed decrypted temporary file is securely cleaned', () async {
     final source = await createThreePagePdf();
     final encrypted = await service.protectPdfAdvanced(
