@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'ads_service.dart';
 import 'file_store.dart';
 import 'pdf_service.dart';
 import 'pdf_viewer.dart';
@@ -12,7 +13,6 @@ import 'signature_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await MobileAds.instance.initialize();
   runApp(const PDFMateApp());
 }
 
@@ -66,17 +66,18 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadFiles();
     _search.addListener(() => setState(() {}));
-    _banner = BannerAd(
-      adUnitId: 'ca-app-pub-3940256099942544/6300978111',
-      request: const AdRequest(),
-      size: AdSize.banner,
-      listener: BannerAdListener(
-        onAdFailedToLoad: (ad, error) {
-          ad.dispose();
-          if (mounted) setState(() => _banner = null);
-        },
-      ),
-    )..load();
+    _initializeAds();
+  }
+
+  Future<void> _initializeAds() async {
+    await AdsService.instance.initialize();
+    if (!mounted) return;
+    _banner = AdsService.instance.createBanner(
+      onChanged: () {
+        if (mounted) setState(() {});
+      },
+    );
+    setState(() {});
   }
 
   @override
@@ -120,6 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+      await AdsService.instance.recordCompletedOperation();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -602,6 +604,14 @@ class _HomeScreenState extends State<HomeScreen> {
             Text('PDFMate Beta'),
           ],
         ),
+        actions: [
+          if (AdsService.instance.privacyOptionsRequired)
+            IconButton(
+              tooltip: 'Privacy choices',
+              onPressed: AdsService.instance.showPrivacyOptions,
+              icon: const Icon(Icons.privacy_tip_outlined),
+            ),
+        ],
       ),
       body: SafeArea(
         child: Stack(
