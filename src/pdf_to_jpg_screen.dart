@@ -134,21 +134,71 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
       _busy = true;
       _status = 'Saving to Gallery/PDFMate…';
     });
+
+    final failed = <int>[];
     var saved = 0;
     try {
       for (final i in _selected.toList()..sort()) {
-        final result = await widget.service.saveJpgToGallery(_images[i]);
-        if (result != null) saved++;
+        try {
+          await widget.service.saveJpgToGallery(_images[i]);
+          saved++;
+        } catch (_) {
+          failed.add(i);
+        }
       }
+
       if (!mounted) return;
-      setState(() => _status = 'Saved $saved image(s) to Gallery/PDFMate.');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved $saved JPG image(s)')),
-      );
-    } catch (e) {
-      if (mounted) {
+      setState(() {
+        _status = failed.isEmpty
+            ? 'Saved $saved image(s) to Gallery/PDFMate.'
+            : 'Saved $saved image(s); ${failed.length} failed.';
+      });
+
+      if (failed.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gallery save failed: $e')),
+          SnackBar(content: Text('Saved $saved JPG image(s)')),
+        );
+        return;
+      }
+
+      final retry = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Some images were not saved'),
+          content: Text(
+            '${failed.length} JPG image(s) were not confirmed by Android. '
+            'Retry only the failed pages?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+
+      if (retry == true) {
+        var recovered = 0;
+        for (final i in failed) {
+          try {
+            await widget.service.saveJpgToGallery(_images[i]);
+            recovered++;
+          } catch (_) {}
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              recovered == failed.length
+                  ? 'All failed JPGs saved on retry.'
+                  : 'Recovered $recovered of ${failed.length} failed JPGs.',
+            ),
+          ),
         );
       }
     } finally {
