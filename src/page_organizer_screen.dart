@@ -4,16 +4,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 
+import 'lru_future_cache.dart';
 import 'pdf_service.dart';
 
 class _PageItem {
-  _PageItem({
-    required this.originalIndex,
-    required this.thumb,
-  });
+  _PageItem({required this.originalIndex});
 
   final int originalIndex;
-  final Uint8List thumb;
   int rotation = 0;
   bool selected = false;
 }
@@ -31,8 +28,17 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
   File? _source;
   String? _password;
   final List<_PageItem> _pages = [];
+  final LruFutureCache<int, Uint8List?> _thumbCache =
+      LruFutureCache<int, Uint8List?>(capacity: 32);
+
   bool _busy = false;
   String _status = 'Choose a PDF to visually organize its pages.';
+
+  @override
+  void dispose() {
+    _thumbCache.clear();
+    super.dispose();
+  }
 
   Future<String?> _askPassword() async {
     final controller = TextEditingController();
@@ -66,14 +72,29 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
     return value;
   }
 
+  Future<Uint8List?> _thumbnailFor(int originalIndex) {
+    final source = _source;
+    if (source == null) return Future<Uint8List?>.value(null);
+    return _thumbCache.getOrCreate(
+      originalIndex,
+      () => widget.service.renderPage(
+        source,
+        originalIndex,
+        password: _password,
+        width: 260,
+      ),
+    );
+  }
+
   Future<void> _pick() async {
     final file = await widget.service.pickPdfFile();
     if (file == null) return;
 
     setState(() {
       _busy = true;
-      _status = 'Rendering page thumbnails…';
+      _status = 'Reading page index…';
       _pages.clear();
+      _thumbCache.clear();
       _source = file;
       _password = null;
     });
@@ -81,20 +102,20 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
     try {
       while (true) {
         try {
-          final thumbs = await widget.service.renderThumbnails(
+          final count = await widget.service.pageCount(
             file,
             password: _password,
-            width: 260,
           );
           if (!mounted) return;
           setState(() {
             _pages
               ..clear()
               ..addAll([
-                for (var i = 0; i < thumbs.length; i++)
-                  _PageItem(originalIndex: i, thumb: thumbs[i]),
+                for (var i = 0; i < count; i++)
+                  _PageItem(originalIndex: i),
               ]);
-            _status = '${_pages.length} page(s) — drag to reorder.';
+            _status =
+                '$count page(s) — thumbnails load only when visible.';
           });
           break;
         } on PdfPasswordRequired {
@@ -144,6 +165,9 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
       return;
     }
     setState(() {
+      for (final page in _pages.where((e) => e.selected)) {
+        _thumbCache.remove(page.originalIndex);
+      }
       _pages.removeWhere((e) => e.selected);
       _status = '${_pages.length} page(s) remaining.';
     });
@@ -323,9 +347,30 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                                         child: RotatedBox(
                                           quarterTurns:
                                               (page.rotation ~/ 90) % 4,
-                                          child: Image.memory(
-                                            page.thumb,
-                                            fit: BoxFit.cover,
+                                          child: FutureBuilder<Uint8List?>(
+                                            future: _thumbnailFor(
+                                              page.originalIndex,
+                                            ),
+                                            builder: (context, snapshot) {
+                                              final bytes = snapshot.data;
+                                              if (bytes == null) {
+                                                return const Center(
+                                                  child: SizedBox(
+                                                    width: 18,
+                                                    height: 18,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              return Image.memory(
+                                                bytes,
+                                                fit: BoxFit.cover,
+                                                gaplessPlayback: true,
+                                              );
+                                            },
                                           ),
                                         ),
                                       ),
