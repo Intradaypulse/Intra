@@ -1034,12 +1034,30 @@ class PdfService {
           final result = await recognizer.processImage(
             InputImage.fromFilePath(file.path),
           );
-          texts.add(
-            _orderedOcrWords(
-              result,
-              tableRows: tableRows,
-            ).map((w) => w.text).join(' '),
-          );
+          if (tableRows) {
+            texts.add(
+              _orderedOcrWords(
+                result,
+                tableRows: true,
+              ).map((w) => w.text).join(' '),
+            );
+          } else {
+            final blocks = ocrReadingOrder([
+              for (final block in result.blocks)
+                OcrRegion(
+                  block,
+                  block.boundingBox.left,
+                  block.boundingBox.top,
+                  block.boundingBox.right,
+                  block.boundingBox.bottom,
+                ),
+            ]);
+            texts.add(
+              blocks
+                  .map((b) => b.lines.map((l) => l.text).join('\n'))
+                  .join('\n\n'),
+            );
+          }
         } finally {
           await secureDeleteTemporary(file);
         }
@@ -1398,7 +1416,10 @@ class PdfService {
       if (await output.exists()) await output.delete();
       rethrow;
     } finally {
-      await writer?.close();
+      // A full disk can fail both flush and close; cleanup must still run.
+      try {
+        await writer?.close();
+      } catch (_) {}
       await secureDeleteTemporary(manifest);
       await recognizer.close();
       await doc?.dispose();

@@ -4,11 +4,86 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart' as pf;
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:pdfmate/pdf_service.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'overlay_fixture.dart';
 
 void registerUnicodeOverlayCases() {
+  testWidgets(
+    'Hindi scan end-to-end preserves pixels and searchable word placement',
+    (tester) async {
+      final directory = await Directory(
+        (await getTemporaryDirectory()).path,
+      ).createTemp('hindi_e2e_');
+      final docs = await Directory('${directory.path}/docs').create();
+      final temp = await Directory('${directory.path}/temp').create();
+      final service = PdfService(
+        documentsDirectoryProvider: () async => docs,
+        temporaryDirectoryProvider: () async => temp,
+      );
+      final image = pw.MemoryImage(base64Decode(hindiScanBase64));
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.Page(
+          pageFormat: const pf.PdfPageFormat(600, 300),
+          margin: pw.EdgeInsets.zero,
+          build: (_) => pw.Image(image, width: 600, height: 300),
+        ),
+      );
+      final source = await File(
+        '${docs.path}/scan.pdf',
+      ).writeAsBytes(await pdf.save());
+      final original = await source.readAsBytes();
+      final engine = Pdf();
+      PdfDoc? result;
+      try {
+        final output = await service.makeSearchablePdf(
+          source,
+          script: TextRecognitionScript.devanagiri,
+        );
+        expect(
+          (await output.readAsBytes()).sublist(0, original.length),
+          original,
+        );
+        result = await engine.open(FileSource(output));
+        final text = await result.extract(pages: PdfPages.single(0));
+        expect(text.replaceAll(RegExp(r'\s+'), ''), contains('नमस्तेभारत'));
+        final hits = await result.search(
+          query: 'नमस्ते',
+          pages: PdfPages.single(0),
+        );
+        expect(hits, hasLength(1));
+        expect(hits.first.rect.x, closeTo(50, 15));
+        expect(hits.first.rect.y, inInclusiveRange(150, 240));
+        expect(
+          await service.renderPage(output, 0),
+          await service.renderPage(source, 0),
+        );
+        final second = await service.makeSearchablePdf(
+          output,
+          script: TextRecognitionScript.devanagiri,
+        );
+        await result.dispose();
+        result = await engine.open(FileSource(second));
+        final secondText = await result.extract(pages: PdfPages.single(0));
+        expect(
+          'नमस्ते'.allMatches(secondText).length,
+          1,
+          reason: 'A second OCR pass must not duplicate existing text',
+        );
+        expect(await temp.list().toList(), isEmpty);
+      } finally {
+        await result?.dispose();
+        await engine.dispose();
+        await directory.delete(recursive: true);
+      }
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
   testWidgets(
     'Hindi incremental overlay retains source bytes, forms, bookmarks and pixels',
     (tester) async {
