@@ -56,6 +56,7 @@ void main() {
       // Keep an arbitrary physical camera scene from triggering auto-capture
       // while this test is checking preview, torch and lifecycle recovery.
       final autoCapture = find.byType(Switch);
+      await _waitFor(tester, autoCapture);
       if (tester.widget<Switch>(autoCapture).value) {
         await tester.tap(autoCapture);
         await tester.pump();
