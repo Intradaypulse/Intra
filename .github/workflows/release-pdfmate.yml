@@ -102,6 +102,7 @@ jobs:
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
           cp -r src/assets buildapp/assets
+          python3 scripts/configure_native_overlay.py
           rm -f buildapp/test/widget_test.dart
           mkdir -p buildapp/test
           if [ -d test ]; then cp -r test/. buildapp/test/; fi

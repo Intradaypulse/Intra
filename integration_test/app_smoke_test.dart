@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'unicode_overlay_cases.dart';
 
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -13,6 +14,8 @@ import 'package:pdfmate/pdf_service.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  registerUnicodeOverlayCases();
 
   testWidgets(
     'app boots, settings and camera lifecycle work',
@@ -49,10 +52,41 @@ void main() {
 
       debugPrint('SMOKE: opening camera');
       await tester.tap(find.text('Scan document'));
+      await tester.pump();
+      // Keep an arbitrary physical camera scene from triggering auto-capture
+      // while this test is checking preview, torch and lifecycle recovery.
+      final autoCapture = find.byType(Switch);
+      await _waitFor(tester, autoCapture);
+      if (tester.widget<Switch>(autoCapture).value) {
+        await tester.tap(autoCapture);
+        await tester.pump();
+      }
       await tester.pump(const Duration(seconds: 4));
       expect(find.byType(LiveScannerScreen), findsOneWidget);
       expect(find.text('Auto'), findsOneWidget);
       await _waitFor(tester, find.byType(CameraPreview));
+      if (const bool.fromEnvironment('PDFMATE_PHYSICAL_QA')) {
+        await tester.tap(find.byTooltip('Torch'));
+        await tester.pump(const Duration(seconds: 1));
+        expect(
+          tester
+              .widget<CameraPreview>(find.byType(CameraPreview))
+              .controller
+              .value
+              .flashMode,
+          FlashMode.torch,
+        );
+        await tester.tap(find.byTooltip('Torch'));
+        await tester.pump(const Duration(seconds: 1));
+        expect(
+          tester
+              .widget<CameraPreview>(find.byType(CameraPreview))
+              .controller
+              .value
+              .flashMode,
+          FlashMode.off,
+        );
+      }
       debugPrint('SMOKE: camera pause/resume');
       binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
