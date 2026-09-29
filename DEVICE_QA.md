@@ -25,3 +25,35 @@ For each OEM, record model, OS, commit, pass/fail and evidence for:
 | Large OCR | Run a representative 300+ page Hindi scan with adequate disk space. Record source/output sizes, free space and peak memory. Cancel once and retry; no partial output should be shown. |
 
 Keep failed devices as failures. Do not turn a pending observation into a pass based on a successful build. Share only app diagnostics from a test phone; review logs before uploading.
+
+## Real document corpus (separate from generated fixtures)
+Prepare a debug test installation, then run:
+
+```
+python3 scripts/run_document_corpus.py --serial DEVICE_ID --corpus /path/to/consented-test-documents
+```
+
+The folder must contain real PDFs and `corpus.json`, for example:
+
+```json
+[{"file":"hindi-columns.pdf","script":"devanagiri","pages":300,"tableRows":false,
+  "checks":[{"page":0,"orderedText":["पहला","दूसरा"]},
+            {"page":299,"orderedText":["अंतिम"]}]}]
+```
+
+Page indices are zero based. Use independently checked expected words, not output
+from the OCR under test. Include 300, 500 and 1000-page scans, columns, tables,
+90/180/270-degree scans and mixed scripts. This runner checks page count and
+expected reading order; manually inspect selection bounding boxes. It does not
+claim character-error accuracy or physical-device coverage from synthetic tests.
+Arabic/Hebrew are explicitly rejected until a capable recognizer is integrated.
+
+Low-space: the Hindi native writer now checks free space before processing. Verify
+on an isolated low-storage emulator, then free space and retry. Do not fill a
+personal phone to test this. A preflight reserve cannot guarantee success if
+another application consumes disk space concurrently.
+
+Process death: kill the test application during OCR, relaunch, and inspect private
+cache for abandoned `pdfmate_overlay_*` and `pdfmate_secure_tmp_*` files. Confirm
+original document opens and no partial new document is listed. Interrupted jobs
+are not resumable; rerun the job. Record actual observations before marking pass.

@@ -1,5 +1,6 @@
 package com.pdfmateapp.pdfmate
 
+import android.os.StatFs
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
@@ -81,6 +82,12 @@ class MainActivity : FlutterActivity() {
         }
         val working = File(scratch, "result.pdf")
         try {
+            // Reserve room for the incremental copy and parser spill before
+            // expensive work. Runtime ENOSPC still goes through atomic cleanup.
+            val requiredBytes = source.length() * 2 + 32L * 1024 * 1024
+            require(StatFs(scratch.path).availableBytes >= requiredBytes) {
+                "Not enough free storage for this PDF. Free at least ${requiredBytes / (1024 * 1024)} MiB and retry."
+            }
             val memory = MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)
             PDDocument.load(source, password, memory).use { doc ->
                 require(doc.currentAccessPermission.canModify()) {
