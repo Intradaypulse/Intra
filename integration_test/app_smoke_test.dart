@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
@@ -13,45 +14,62 @@ import 'package:pdfmate/pdf_service.dart';
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('app boots, settings and camera lifecycle work', (tester) async {
-    await app.main();
-    await tester.pumpAndSettle(const Duration(seconds: 2));
+  testWidgets(
+    'app boots, settings and camera lifecycle work',
+    (tester) async {
+      debugPrint('SMOKE: launching app');
+      await app.main();
+      await _settle(tester);
 
-    final skip = find.text('Skip');
-    if (skip.evaluate().isNotEmpty) {
-      await tester.tap(skip);
-      await tester.pumpAndSettle(const Duration(seconds: 2));
-    }
+      final skip = find.text('Skip');
+      if (skip.evaluate().isNotEmpty) {
+        await tester.tap(skip);
+        await _settle(tester);
+      }
 
-    expect(find.text('PDFMate Beta'), findsOneWidget);
-    expect(find.text('Scan document'), findsOneWidget);
+      expect(find.text('PDFMate Beta'), findsOneWidget);
+      expect(find.text('Scan document'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-    expect(find.text('Settings'), findsOneWidget);
-    expect(find.text('Auto-save a copy to Downloads'), findsOneWidget);
+      debugPrint('SMOKE: home ready, opening settings');
+      await tester.tap(find.byTooltip('Settings'));
+      await _settle(tester);
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('Auto-save a copy to Downloads'), findsOneWidget);
 
-    binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    await tester.pump(const Duration(milliseconds: 250));
-    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pumpAndSettle();
+      debugPrint('SMOKE: settings pause/resume');
+      // A paused binding does not schedule frames. Awaiting pump before resumed
+      // deadlocks a live integration test even though the application is healthy.
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await _settle(tester);
 
-    expect(find.text('Settings'), findsOneWidget);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
+      expect(find.text('Settings'), findsOneWidget);
+      await tester.pageBack();
+      await _settle(tester);
 
-    await tester.tap(find.text('Scan document'));
-    await tester.pump(const Duration(seconds: 4));
-    expect(find.byType(LiveScannerScreen), findsOneWidget);
-    expect(find.text('Auto'), findsOneWidget);
+      debugPrint('SMOKE: opening camera');
+      await tester.tap(find.text('Scan document'));
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.byType(LiveScannerScreen), findsOneWidget);
+      expect(find.text('Auto'), findsOneWidget);
+      await _waitFor(tester, find.byType(CameraPreview));
+      debugPrint('SMOKE: camera pause/resume');
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump(const Duration(seconds: 2));
+      await _waitFor(tester, find.byType(CameraPreview));
 
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    expect(find.text('PDFMate Beta'), findsOneWidget);
-  });
+      await tester.pageBack();
+      await _settle(tester);
+      expect(find.text('PDFMate Beta'), findsOneWidget);
+      debugPrint('SMOKE: lifecycle checks complete');
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
 
-  testWidgets('Android scoped-storage exports return confirmed destinations',
-      (tester) async {
+  testWidgets('Android scoped-storage exports return confirmed destinations', (
+    tester,
+  ) async {
     final service = PdfService();
     final tmp = await getTemporaryDirectory();
 
@@ -83,4 +101,20 @@ void main() {
       if (await jpgFile.exists()) await jpgFile.delete();
     }
   });
+}
+
+Future<void> _settle(WidgetTester tester) async {
+  await tester.pumpAndSettle(
+    const Duration(milliseconds: 100),
+    EnginePhase.sendSemanticsUpdate,
+    const Duration(seconds: 30),
+  );
+}
+
+Future<void> _waitFor(WidgetTester tester, Finder finder) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 30));
+  while (finder.evaluate().isEmpty && DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 200));
+  }
+  expect(finder, findsOneWidget);
 }

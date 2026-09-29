@@ -46,6 +46,7 @@ jobs:
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
+          cp -r src/assets buildapp/assets
           rm -f buildapp/test/widget_test.dart
           mkdir -p buildapp/test buildapp/integration_test
           if [ -d test ]; then cp -r test/. buildapp/test/; fi
@@ -247,6 +248,7 @@ jobs:
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
+          cp -r src/assets buildapp/assets
           rm -f buildapp/test/widget_test.dart
           mkdir -p buildapp/integration_test
           cp -r integration_test/. buildapp/integration_test/
@@ -297,6 +299,10 @@ jobs:
         working-directory: buildapp
         run: flutter pub get
 
+      - name: Build integration-test APK
+        working-directory: buildapp
+        run: flutter build apk --debug --target-platform android-x64 --target integration_test/app_smoke_test.dart
+
       - name: Android emulator app smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -306,4 +312,17 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
-          script: cd buildapp && flutter test integration_test/app_smoke_test.dart -d emulator-5554
+          script: |
+            mkdir -p device-logs
+            adb logcat -c
+            adb install -r -g buildapp/build/app/outputs/flutter-apk/app-debug.apk
+            cd buildapp && timeout 15m flutter test integration_test/app_smoke_test.dart -d emulator-5554 --reporter expanded > ../device-logs/flutter-test.log 2>&1; result=$?; cat ../device-logs/flutter-test.log; adb logcat -d -v threadtime > ../device-logs/logcat.txt; adb shell dumpsys activity activities > ../device-logs/activities.txt; exit $result
+
+      - name: Upload Android test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Android-test-diagnostics
+          path: device-logs/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -22,6 +22,7 @@ class OcrScreen extends StatefulWidget {
 
 class _OcrScreenState extends State<OcrScreen> {
   File? _source;
+  PdfOperationControl? _operation;
   TextRecognitionScript _script = TextRecognitionScript.latin;
   bool _busy = false;
   int _pageCount = 0;
@@ -31,12 +32,12 @@ class _OcrScreenState extends State<OcrScreen> {
   String? _extractedText;
 
   String _scriptLabel(TextRecognitionScript script) => switch (script) {
-        TextRecognitionScript.latin => 'Latin',
-        TextRecognitionScript.chinese => 'Chinese',
-        TextRecognitionScript.devanagiri => 'Devanagari / Hindi',
-        TextRecognitionScript.japanese => 'Japanese',
-        TextRecognitionScript.korean => 'Korean',
-      };
+    TextRecognitionScript.latin => 'Latin',
+    TextRecognitionScript.chinese => 'Chinese',
+    TextRecognitionScript.devanagiri => 'Devanagari / Hindi',
+    TextRecognitionScript.japanese => 'Japanese',
+    TextRecognitionScript.korean => 'Korean',
+  };
 
   Future<String?> _askPassword() async {
     final controller = TextEditingController();
@@ -71,65 +72,81 @@ class _OcrScreenState extends State<OcrScreen> {
   }
 
   Future<void> _pick() async {
-    final previous = _source;
-    final picked = await widget.service.pickPdfFile();
-    if (picked != null && previous != null && previous.path != picked.path) {
-      await widget.service.secureDeleteTemporary(previous);
-    }
-    if (picked == null) return;
-    var file = picked;
-
-    setState(() {
-      _busy = true;
-      _extractedText = null;
-      _status = 'Checking PDF…';
-    });
-
+    if (_busy) return;
+    setState(() => _busy = true);
     try {
-      while (true) {
-        try {
-          final count = await widget.service.pageCount(file);
-          if (!mounted) return;
-          final signed =
-              await widget.service.hasDigitalSignatures(file);
-          if (!mounted) return;
-          setState(() {
-            _source = file;
-            _pageCount = count;
-            _heavyUnlocked =
-                count <= TelemetryService.instance.rewardedOcrThresholdPages;
-            _hasDigitalSignatures = signed;
-            _status = signed
-                ? '$count page(s) • digitally signed document'
-                : '$count page(s) ready for OCR.';
-          });
-          break;
-        } on PdfPasswordRequired {
-          if (!mounted) return;
-          final password = await _askPassword();
-          if (password == null) return;
+      final previous = _source;
+      final picked = await widget.service.pickPdfFile();
+      if (picked == null) return;
+      if (!mounted) {
+        await widget.service.secureDeleteTemporary(picked);
+        return;
+      }
+      var file = picked;
+
+      setState(() {
+        _busy = true;
+        _extractedText = null;
+        _status = 'Checking PDF…';
+      });
+
+      try {
+        while (true) {
           try {
-            file = await widget.service.decryptToTemporary(file, password);
-          } on PdfWrongPassword {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Wrong password.')),
-              );
+            final count = await widget.service.pageCount(file);
+            if (!mounted) return;
+            final signed = await widget.service.hasDigitalSignatures(file);
+            if (!mounted) return;
+            setState(() {
+              _source = file;
+              _pageCount = count;
+              _heavyUnlocked =
+                  count <= TelemetryService.instance.rewardedOcrThresholdPages;
+              _hasDigitalSignatures = signed;
+              _status = signed
+                  ? '$count page(s) • digitally signed document'
+                  : '$count page(s) ready for OCR.';
+            });
+            break;
+          } on PdfPasswordRequired {
+            if (!mounted) return;
+            final password = await _askPassword();
+            if (password == null) return;
+            try {
+              file = await widget.service.decryptToTemporary(file, password);
+            } on PdfWrongPassword {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Wrong password.')),
+                );
+              }
             }
           }
         }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Could not open PDF: $e')));
+        }
+      } finally {
+        if (_source?.path != file.path || !mounted) {
+          await widget.service.secureDeleteTemporary(file);
+        }
+        if (_source?.path != previous?.path) {
+          await widget.service.secureDeleteTemporary(previous);
+        }
+        if (mounted) setState(() => _busy = false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open PDF: $e')),
-        );
-      }
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not choose PDF: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
-
 
   Future<bool> _ensureLargeOcrUnlocked() async {
     final threshold = TelemetryService.instance.rewardedOcrThresholdPages;
@@ -224,7 +241,7 @@ class _OcrScreenState extends State<OcrScreen> {
   Future<void> _extract() async {
     final source = _source;
     if (source == null) return;
-    if (!await _ensureLargeOcrUnlocked()) return;
+    if (!await _ensureLargeOcrUnlocked() || !mounted) return;
 
     setState(() {
       _busy = true;
@@ -232,10 +249,19 @@ class _OcrScreenState extends State<OcrScreen> {
       _extractedText = null;
     });
 
+    _operation = PdfOperationControl(
+      onProgress: (completed, total) {
+        if (mounted)
+          setState(
+            () => _status = 'Processing page ${completed + 1} of $total…',
+          );
+      },
+    );
     try {
       final pages = await widget.service.ocrPdf(
         source,
         script: _script,
+        control: _operation,
       );
       final combined = [
         for (var i = 0; i < pages.length; i++)
@@ -247,14 +273,17 @@ class _OcrScreenState extends State<OcrScreen> {
         _extractedText = combined;
         _status = 'OCR complete for ${pages.length} page(s).';
       });
+    } on PdfOperationCancelled {
+      if (mounted) setState(() => _status = 'Cancelled.');
     } catch (e) {
       if (mounted) {
         setState(() => _status = 'OCR failed.');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('OCR failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('OCR failed: $e')));
       }
     } finally {
+      _operation = null;
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -289,35 +318,77 @@ class _OcrScreenState extends State<OcrScreen> {
   Future<void> _makeSearchable() async {
     final source = _source;
     if (source == null) return;
-    if (!await _ensureLargeOcrUnlocked()) return;
-    if (!await _confirmSignedPdfModification()) return;
+    if (!await _ensureLargeOcrUnlocked() || !mounted) return;
+    if (!await _confirmSignedPdfModification() || !mounted) return;
+    if (_script == TextRecognitionScript.devanagiri) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Hindi searchable copy'),
+          content: const Text(
+            'Hindi OCR creates new image-based pages with an embedded '
+            'searchable text layer. Original links, forms, annotations, '
+            'bookmarks, vector content and signatures will not carry over. '
+            'The original PDF stays unchanged. Continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Create copy'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true || !mounted) return;
+    }
 
     setState(() {
       _busy = true;
       _status = 'Building searchable PDF…';
     });
 
+    _operation = PdfOperationControl(
+      onProgress: (completed, total) {
+        if (mounted)
+          setState(
+            () => _status = 'Processing page ${completed + 1} of $total…',
+          );
+      },
+    );
     try {
       final output = await widget.service.makeSearchablePdf(
         source,
         script: _script,
+        control: _operation,
       );
-      if (!mounted) return;
+      if (!mounted) {
+        await output.delete();
+        return;
+      }
+      setState(() => _busy = false);
       Navigator.of(context).pop<File>(output);
+    } on PdfOperationCancelled {
+      if (mounted) setState(() => _status = 'Cancelled.');
     } catch (e) {
       if (mounted) {
         setState(() => _status = 'Searchable PDF failed.');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Searchable PDF failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Searchable PDF failed: $e')));
       }
     } finally {
+      _operation = null;
       if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   void dispose() {
+    _operation?.cancel();
     unawaited(widget.service.secureDeleteTemporary(_source));
     super.dispose();
   }
@@ -326,124 +397,133 @@ class _OcrScreenState extends State<OcrScreen> {
   Widget build(BuildContext context) {
     final text = _extractedText;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('OCR & searchable PDF')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.document_scanner_outlined),
-                title: Text(
-                  _source?.uri.pathSegments.last ?? 'No PDF selected',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(_status),
-                trailing: OutlinedButton(
-                  onPressed: _busy ? null : _pick,
-                  child: const Text('Choose'),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<TextRecognitionScript>(
-              initialValue: _script,
-              decoration: const InputDecoration(
-                labelText: 'OCR script / language family',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                for (final script in TextRecognitionScript.values)
-                  DropdownMenuItem(
-                    value: script,
-                    child: Text(_scriptLabel(script)),
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('OCR & searchable PDF')),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.document_scanner_outlined),
+                  title: Text(
+                    _source?.uri.pathSegments.last ?? 'No PDF selected',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-              ],
-              onChanged: _busy
-                  ? null
-                  : (value) {
-                      if (value != null) setState(() => _script = value);
-                    },
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _script == TextRecognitionScript.latin
-                  ? 'Recognition runs on-device. Latin searchable PDFs preserve the original PDF and add a word-level OCR layer.'
-                  : 'Recognition runs on-device. PDFMate first uses a compatible Android system Noto/Droid font when available, with Noto download fallback if the device does not provide one.',
-            ),
-            if (_hasDigitalSignatures) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'This file has digital signatures. Creating a modified OCR copy can change signature validation status.',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ],
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed:
-                        (_source == null || _busy) ? null : _extract,
-                    icon: const Icon(Icons.text_snippet_outlined),
-                    label: const Text('Extract text'),
+                  subtitle: Text(_status),
+                  trailing: OutlinedButton(
+                    onPressed: _busy ? null : _pick,
+                    child: const Text('Choose'),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed:
-                        (_source == null || _busy) ? null : _makeSearchable,
-                    icon: const Icon(Icons.manage_search_rounded),
-                    label: const Text('Make searchable'),
-                  ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<TextRecognitionScript>(
+                initialValue: _script,
+                decoration: const InputDecoration(
+                  labelText: 'OCR script / language family',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final script in TextRecognitionScript.values)
+                    DropdownMenuItem(
+                      value: script,
+                      child: Text(_scriptLabel(script)),
+                    ),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        if (value != null) setState(() => _script = value);
+                      },
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _script == TextRecognitionScript.latin
+                    ? 'Recognition runs on-device. Latin searchable PDFs preserve the original PDF and add a word-level OCR layer.'
+                    : 'Recognition runs on-device. Chinese, Japanese and Korean use a verified native text overlay. Hindi uses a bundled Unicode font in a new image-based copy.',
+              ),
+              if (_hasDigitalSignatures) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'This file has digital signatures. Creating a modified OCR copy can change signature validation status.',
+                  style: TextStyle(fontWeight: FontWeight.w600),
                 ),
               ],
-            ),
-            if (_busy) ...[
               const SizedBox(height: 18),
-              const LinearProgressIndicator(),
-            ],
-            if (text != null) ...[
-              const SizedBox(height: 20),
               Row(
                 children: [
-                  Text(
-                    'Recognized text',
-                    style: Theme.of(context).textTheme.titleMedium,
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: (_source == null || _busy) ? null : _extract,
+                      icon: const Icon(Icons.text_snippet_outlined),
+                      label: const Text('Extract text'),
+                    ),
                   ),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: () async {
-                      await Clipboard.setData(ClipboardData(text: text));
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Copied to clipboard')),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.copy_rounded),
-                    label: const Text('Copy all'),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: (_source == null || _busy)
+                          ? null
+                          : _makeSearchable,
+                      icon: const Icon(Icons.manage_search_rounded),
+                      label: const Text('Make searchable'),
+                    ),
                   ),
                 ],
               ),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 420),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Theme.of(context).dividerColor,
+              if (_busy) ...[
+                const SizedBox(height: 18),
+                const LinearProgressIndicator(),
+                if (_operation != null)
+                  TextButton(
+                    onPressed: () {
+                      _operation?.cancel();
+                      setState(() => _status = 'Cancelling…');
+                    },
+                    child: const Text('Cancel'),
                   ),
-                  borderRadius: BorderRadius.circular(12),
+              ],
+              if (text != null) ...[
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Text(
+                      'Recognized text',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: text));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Copied to clipboard'),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.copy_rounded),
+                      label: const Text('Copy all'),
+                    ),
+                  ],
                 ),
-                child: SingleChildScrollView(
-                  child: SelectableText(text),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 420),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Theme.of(context).dividerColor),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SingleChildScrollView(child: SelectableText(text)),
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

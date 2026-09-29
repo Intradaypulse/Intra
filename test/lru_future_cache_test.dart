@@ -27,6 +27,16 @@ void main() {
     expect(loads, 4);
   });
 
+  test('failed thumbnail is evicted so a later request can retry', () async {
+    final cache = LruFutureCache<int, String>(capacity: 2);
+    await expectLater(
+      cache.getOrCreate(1, () async => throw StateError('render failed')),
+      throwsStateError,
+    );
+    expect(cache.length, 0);
+    expect(await cache.getOrCreate(1, () async => 'retried'), 'retried');
+  });
+
   test('LRU cache clear removes all retained futures', () async {
     final cache = LruFutureCache<int, int>(capacity: 3);
     await cache.getOrCreate(1, () async => 1);

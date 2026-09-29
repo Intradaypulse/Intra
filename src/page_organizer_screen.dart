@@ -87,60 +87,63 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
   }
 
   Future<void> _pick() async {
-    final file = await widget.service.pickPdfFile();
-    if (file == null) return;
-
+    if (_busy) return;
     setState(() {
       _busy = true;
       _status = 'Reading page index…';
-      _pages.clear();
-      _thumbCache.clear();
-      _source = file;
-      _password = null;
     });
-
+    File? candidate;
     try {
-      while (true) {
+      candidate = await widget.service.pickPdfFile();
+      if (candidate == null || !mounted) return;
+      String? password;
+      while (mounted) {
         try {
           final count = await widget.service.pageCount(
-            file,
-            password: _password,
+            candidate,
+            password: password,
           );
           if (!mounted) return;
+          final previous = _source;
           setState(() {
+            _source = candidate;
+            _password = password;
+            _thumbCache.clear();
             _pages
               ..clear()
               ..addAll([
-                for (var i = 0; i < count; i++)
-                  _PageItem(originalIndex: i),
+                for (var i = 0; i < count; i++) _PageItem(originalIndex: i),
               ]);
-            _status =
-                '$count page(s) — thumbnails load only when visible.';
+            _status = '$count page(s) — thumbnails load only when visible.';
           });
-          break;
+          if (previous?.path != candidate.path) {
+            await widget.service.secureDeleteTemporary(previous);
+          }
+          return;
         } on PdfPasswordRequired {
           if (!mounted) return;
-          final password = await _askPassword();
+          password = await _askPassword();
           if (password == null) return;
-          _password = password;
         } on PdfWrongPassword {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Wrong password. Try again.')),
           );
-          final password = await _askPassword();
+          password = await _askPassword();
           if (password == null) return;
-          _password = password;
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _status = 'Could not open PDF.');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Open failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Open failed: $e')));
       }
     } finally {
+      if (_source?.path != candidate?.path || !mounted) {
+        await widget.service.secureDeleteTemporary(candidate);
+      }
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -202,14 +205,18 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
         password: _password,
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        await output.delete();
+        return;
+      }
+      setState(() => _busy = false);
       Navigator.of(context).pop<File>(output);
     } catch (e) {
       if (mounted) {
         setState(() => _status = 'Save failed.');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Organizer failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Organizer failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -220,202 +227,201 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
   Widget build(BuildContext context) {
     final selectedCount = _pages.where((e) => e.selected).length;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Page organizer'),
-        actions: [
-          if (_pages.isNotEmpty)
-            TextButton(
-              onPressed: _busy ? null : _save,
-              child: const Text('Save'),
-            ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Material(
-              color: Theme.of(context).colorScheme.surfaceContainerLow,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _status,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: _busy ? null : _pick,
-                      icon: const Icon(Icons.folder_open_rounded),
-                      label: Text(_source == null ? 'Choose PDF' : 'Change'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Page organizer'),
+          actions: [
             if (_pages.isNotEmpty)
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 6,
-                ),
-                child: Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: _toggleAll,
-                      icon: const Icon(Icons.select_all_rounded),
-                      label: Text(
-                        selectedCount == _pages.length
-                            ? 'Clear selection'
-                            : 'Select all',
+              TextButton(
+                onPressed: _busy ? null : _save,
+                child: const Text('Save'),
+              ),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Material(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _status,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    FilledButton.tonalIcon(
-                      onPressed: selectedCount == 0
-                          ? null
-                          : () => _rotateSelected(-90),
-                      icon: const Icon(Icons.rotate_left_rounded),
-                      label: const Text('Left'),
-                    ),
-                    const SizedBox(width: 6),
-                    FilledButton.tonalIcon(
-                      onPressed: selectedCount == 0
-                          ? null
-                          : () => _rotateSelected(90),
-                      icon: const Icon(Icons.rotate_right_rounded),
-                      label: const Text('Right'),
-                    ),
-                    const SizedBox(width: 6),
-                    FilledButton.tonalIcon(
-                      onPressed:
-                          selectedCount == 0 ? null : _deleteSelected,
-                      icon: const Icon(Icons.delete_outline_rounded),
-                      label: Text('Delete ($selectedCount)'),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _pick,
+                        icon: const Icon(Icons.folder_open_rounded),
+                        label: Text(_source == null ? 'Choose PDF' : 'Change'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            Expanded(
-              child: _busy && _pages.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : _pages.isEmpty
-                      ? const Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.view_module_outlined, size: 84),
-                              SizedBox(height: 12),
-                              Text('No PDF selected'),
-                            ],
-                          ),
-                        )
-                      : ReorderableListView.builder(
-                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 100),
-                          itemCount: _pages.length,
-                          onReorderItem: (oldIndex, newIndex) {
-                            setState(() {
-                              final item = _pages.removeAt(oldIndex);
-                              _pages.insert(newIndex, item);
-                            });
-                          },
-                          itemBuilder: (context, index) {
-                            final page = _pages[index];
-                            return Card(
-                              key: ValueKey(
-                                'page-${page.originalIndex}',
+              if (_pages.isNotEmpty)
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: _toggleAll,
+                        icon: const Icon(Icons.select_all_rounded),
+                        label: Text(
+                          selectedCount == _pages.length
+                              ? 'Clear selection'
+                              : 'Select all',
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      FilledButton.tonalIcon(
+                        onPressed: selectedCount == 0
+                            ? null
+                            : () => _rotateSelected(-90),
+                        icon: const Icon(Icons.rotate_left_rounded),
+                        label: const Text('Left'),
+                      ),
+                      const SizedBox(width: 6),
+                      FilledButton.tonalIcon(
+                        onPressed: selectedCount == 0
+                            ? null
+                            : () => _rotateSelected(90),
+                        icon: const Icon(Icons.rotate_right_rounded),
+                        label: const Text('Right'),
+                      ),
+                      const SizedBox(width: 6),
+                      FilledButton.tonalIcon(
+                        onPressed: selectedCount == 0 ? null : _deleteSelected,
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        label: Text('Delete ($selectedCount)'),
+                      ),
+                    ],
+                  ),
+                ),
+              Expanded(
+                child: _busy && _pages.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : _pages.isEmpty
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.view_module_outlined, size: 84),
+                            SizedBox(height: 12),
+                            Text('No PDF selected'),
+                          ],
+                        ),
+                      )
+                    : ReorderableListView.builder(
+                        padding: const EdgeInsets.fromLTRB(12, 6, 12, 100),
+                        itemCount: _pages.length,
+                        onReorderItem: (oldIndex, newIndex) {
+                          setState(() {
+                            final item = _pages.removeAt(oldIndex);
+                            _pages.insert(newIndex, item);
+                          });
+                        },
+                        itemBuilder: (context, index) {
+                          final page = _pages[index];
+                          return Card(
+                            key: ValueKey('page-${page.originalIndex}'),
+                            child: ListTile(
+                              onTap: () => setState(
+                                () => page.selected = !page.selected,
                               ),
-                              child: ListTile(
-                                onTap: () => setState(
-                                  () => page.selected = !page.selected,
-                                ),
-                                leading: SizedBox(
-                                  width: 58,
-                                  height: 76,
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      ClipRRect(
-                                        borderRadius:
-                                            BorderRadius.circular(6),
-                                        child: RotatedBox(
-                                          quarterTurns:
-                                              (page.rotation ~/ 90) % 4,
-                                          child: FutureBuilder<Uint8List?>(
-                                            future: _thumbnailFor(
-                                              page.originalIndex,
-                                            ),
-                                            builder: (context, snapshot) {
-                                              final bytes = snapshot.data;
-                                              if (bytes == null) {
-                                                return const Center(
-                                                  child: SizedBox(
-                                                    width: 18,
-                                                    height: 18,
-                                                    child:
-                                                        CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                    ),
-                                                  ),
-                                                );
-                                              }
-                                              return Image.memory(
-                                                bytes,
-                                                fit: BoxFit.cover,
-                                                gaplessPlayback: true,
-                                              );
-                                            },
-                                          ),
-                                        ),
-                                      ),
-                                      if (page.selected)
-                                        DecoratedBox(
-                                          decoration: BoxDecoration(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                                .withValues(alpha: 0.22),
-                                            border: Border.all(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .primary,
-                                              width: 3,
-                                            ),
-                                            borderRadius:
-                                                BorderRadius.circular(6),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                title: Text('Page ${index + 1}'),
-                                subtitle: Text(
-                                  'Original ${page.originalIndex + 1}'
-                                  '${page.rotation == 0 ? '' : ' • ${page.rotation}°'}',
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                              leading: SizedBox(
+                                width: 58,
+                                height: 76,
+                                child: Stack(
+                                  fit: StackFit.expand,
                                   children: [
-                                    Checkbox(
-                                      value: page.selected,
-                                      onChanged: (v) => setState(
-                                        () => page.selected = v ?? false,
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: RotatedBox(
+                                        quarterTurns: (page.rotation ~/ 90) % 4,
+                                        child: FutureBuilder<Uint8List?>(
+                                          future: _thumbnailFor(
+                                            page.originalIndex,
+                                          ),
+                                          builder: (context, snapshot) {
+                                            final bytes = snapshot.data;
+                                            if (bytes == null) {
+                                              return const Center(
+                                                child: SizedBox(
+                                                  width: 18,
+                                                  height: 18,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                      ),
+                                                ),
+                                              );
+                                            }
+                                            return Image.memory(
+                                              bytes,
+                                              fit: BoxFit.cover,
+                                              gaplessPlayback: true,
+                                            );
+                                          },
+                                        ),
                                       ),
                                     ),
-                                    const Icon(Icons.drag_handle_rounded),
+                                    if (page.selected)
+                                      DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                              .withValues(alpha: 0.22),
+                                          border: Border.all(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.primary,
+                                            width: 3,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
-                            );
-                          },
-                        ),
-            ),
-          ],
+                              title: Text('Page ${index + 1}'),
+                              subtitle: Text(
+                                'Original ${page.originalIndex + 1}'
+                                '${page.rotation == 0 ? '' : ' • ${page.rotation}°'}',
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Checkbox(
+                                    value: page.selected,
+                                    onChanged: (v) => setState(
+                                      () => page.selected = v ?? false,
+                                    ),
+                                  ),
+                                  const Icon(Icons.drag_handle_rounded),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );

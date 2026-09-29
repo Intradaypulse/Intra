@@ -56,60 +56,85 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
   }
 
   Future<void> _pickAndConvert() async {
-    final previous = _source;
-    final picked = await widget.service.pickPdfFile();
-    if (picked != null && previous != null && previous.path != picked.path) {
-      await widget.service.secureDeleteTemporary(previous);
-    }
-    if (picked == null) return;
-    var file = picked;
-
-    setState(() {
-      _busy = true;
-      _source = file;
-      _images.clear();
-      _selected.clear();
-      _status = 'Converting pages…';
-    });
-
+    if (_busy) return;
+    setState(() => _busy = true);
     try {
-      while (true) {
-        try {
-          final outputs = await widget.service.pdfToJpgFromFile(file);
-          if (!mounted) return;
-          setState(() {
-            _source = file;
-            _images
-              ..clear()
-              ..addAll(outputs);
-            _selected
-              ..clear()
-              ..addAll(List<int>.generate(outputs.length, (i) => i));
-            _status = 'Converted ${outputs.length} page(s).';
-          });
-          break;
-        } on PdfPasswordRequired {
-          if (!mounted) return;
-          var wrong = false;
-          while (true) {
-            final password = await _askPassword(wrong: wrong);
-            if (password == null) return;
-            try {
-              file = await widget.service.decryptToTemporary(file, password);
-              break;
-            } on PdfWrongPassword {
-              wrong = true;
+      final previous = _source;
+      final picked = await widget.service.pickPdfFile();
+      if (picked == null) return;
+      if (!mounted) {
+        await widget.service.secureDeleteTemporary(picked);
+        return;
+      }
+      var file = picked;
+
+      setState(() {
+        _busy = true;
+
+        _status = 'Converting pages…';
+      });
+
+      try {
+        while (true) {
+          try {
+            final outputs = await widget.service.pdfToJpgFromFile(file);
+            if (!mounted) {
+              for (final output in outputs) {
+                await widget.service.secureDeleteTemporary(output);
+              }
+              return;
+            }
+            final previousImages = List<File>.of(_images);
+            setState(() {
+              _source = file;
+              _images
+                ..clear()
+                ..addAll(outputs);
+              _selected
+                ..clear()
+                ..addAll(List<int>.generate(outputs.length, (i) => i));
+              _status = 'Converted ${outputs.length} page(s).';
+            });
+            for (final image in previousImages) {
+              await widget.service.secureDeleteTemporary(image);
+            }
+            break;
+          } on PdfPasswordRequired {
+            if (!mounted) return;
+            var wrong = false;
+            while (true) {
+              final password = await _askPassword(wrong: wrong);
+              if (password == null) return;
+              try {
+                file = await widget.service.decryptToTemporary(file, password);
+                break;
+              } on PdfWrongPassword {
+                wrong = true;
+              }
             }
           }
         }
+      } catch (e) {
+        if (mounted) {
+          setState(() => _status = 'Conversion failed.');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('PDF to JPG failed: $e')));
+        }
+      } finally {
+        if (_source?.path != file.path || !mounted) {
+          await widget.service.secureDeleteTemporary(file);
+        }
+        if (_source?.path != previous?.path) {
+          await widget.service.secureDeleteTemporary(previous);
+        }
+        if (mounted) setState(() => _busy = false);
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _status = 'Conversion failed.');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PDF to JPG failed: $e')),
-        );
-      }
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not choose PDF: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -120,8 +145,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
     await SharePlus.instance.share(
       ShareParams(
         files: [
-          for (final i in _selected.toList()..sort())
-            XFile(_images[i].path),
+          for (final i in _selected.toList()..sort()) XFile(_images[i].path),
         ],
         text: 'PDF pages exported by PDFMate',
       ),
@@ -155,9 +179,9 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
       });
 
       if (failed.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved $saved JPG image(s)')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Saved $saved JPG image(s)')));
         return;
       }
 
@@ -232,151 +256,153 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
     final allSelected =
         _images.isNotEmpty && _selected.length == _images.length;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('PDF to JPG'),
-        actions: [
-          if (_images.isNotEmpty)
-            TextButton(
-              onPressed: _busy ? null : _toggleAll,
-              child: Text(allSelected ? 'Clear' : 'Select all'),
-            ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _source?.uri.pathSegments.last ?? _status,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: _busy ? null : _pickAndConvert,
-                    child: Text(_source == null ? 'Choose PDF' : 'Change'),
-                  ),
-                ],
-              ),
-            ),
-            if (_busy) const LinearProgressIndicator(),
-            Expanded(
-              child: _images.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          _status,
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    )
-                  : GridView.builder(
-                      padding: const EdgeInsets.all(12),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 10,
-                        crossAxisSpacing: 10,
-                        childAspectRatio: 0.72,
-                      ),
-                      itemCount: _images.length,
-                      itemBuilder: (context, index) {
-                        final selected = _selected.contains(index);
-                        return GestureDetector(
-                          onTap: () => setState(() {
-                            if (selected) {
-                              _selected.remove(index);
-                            } else {
-                              _selected.add(index);
-                            }
-                          }),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: Image.file(
-                                  _images[index],
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              Positioned(
-                                left: 6,
-                                bottom: 6,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(5),
-                                  ),
-                                  child: Text(
-                                    'Page ${index + 1}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                top: 5,
-                                right: 5,
-                                child: CircleAvatar(
-                                  radius: 13,
-                                  backgroundColor: selected
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.black45,
-                                  child: Icon(
-                                    selected
-                                        ? Icons.check_rounded
-                                        : Icons.circle_outlined,
-                                    size: 17,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('PDF to JPG'),
+          actions: [
             if (_images.isNotEmpty)
+              TextButton(
+                onPressed: _busy ? null : _toggleAll,
+                child: Text(allSelected ? 'Clear' : 'Select all'),
+              ),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
               Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                 child: Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed:
-                            (_busy || _selected.isEmpty) ? null : _shareSelected,
-                        icon: const Icon(Icons.share_rounded),
-                        label: Text('Share (${_selected.length})'),
+                      child: Text(
+                        _source?.uri.pathSegments.last ?? _status,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed:
-                            (_busy || _selected.isEmpty) ? null : _saveSelected,
-                        icon: const Icon(Icons.photo_library_rounded),
-                        label: Text('Save (${_selected.length})'),
-                      ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: _busy ? null : _pickAndConvert,
+                      child: Text(_source == null ? 'Choose PDF' : 'Change'),
                     ),
                   ],
                 ),
               ),
-          ],
+              if (_busy) const LinearProgressIndicator(),
+              Expanded(
+                child: _images.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(_status, textAlign: TextAlign.center),
+                        ),
+                      )
+                    : GridView.builder(
+                        padding: const EdgeInsets.all(12),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: 0.72,
+                            ),
+                        itemCount: _images.length,
+                        itemBuilder: (context, index) {
+                          final selected = _selected.contains(index);
+                          return GestureDetector(
+                            onTap: () => setState(() {
+                              if (selected) {
+                                _selected.remove(index);
+                              } else {
+                                _selected.add(index);
+                              }
+                            }),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Image.file(
+                                    _images[index],
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                Positioned(
+                                  left: 6,
+                                  bottom: 6,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                    child: Text(
+                                      'Page ${index + 1}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 5,
+                                  right: 5,
+                                  child: CircleAvatar(
+                                    radius: 13,
+                                    backgroundColor: selected
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.black45,
+                                    child: Icon(
+                                      selected
+                                          ? Icons.check_rounded
+                                          : Icons.circle_outlined,
+                                      size: 17,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              if (_images.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: (_busy || _selected.isEmpty)
+                              ? null
+                              : _shareSelected,
+                          icon: const Icon(Icons.share_rounded),
+                          label: Text('Share (${_selected.length})'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: (_busy || _selected.isEmpty)
+                              ? null
+                              : _saveSelected,
+                          icon: const Icon(Icons.photo_library_rounded),
+                          label: Text('Save (${_selected.length})'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -11,23 +11,21 @@ class AdsService {
 
   static final AdsService instance = AdsService._();
 
-  static const _bannerTestId =
-      'ca-app-pub-3940256099942544/6300978111';
-  static const _interstitialTestId =
-      'ca-app-pub-3940256099942544/1033173712';
-  static const _rewardedTestId =
-      'ca-app-pub-3940256099942544/5224354917';
-  static const _appOpenTestId =
-      'ca-app-pub-3940256099942544/9257395921';
+  static const _bannerTestId = 'ca-app-pub-3940256099942544/6300978111';
+  static const _interstitialTestId = 'ca-app-pub-3940256099942544/1033173712';
+  static const _rewardedTestId = 'ca-app-pub-3940256099942544/5224354917';
+  static const _appOpenTestId = 'ca-app-pub-3940256099942544/9257395921';
 
-  static const _productionBannerId =
-      String.fromEnvironment('ADMOB_BANNER_ID');
-  static const _productionInterstitialId =
-      String.fromEnvironment('ADMOB_INTERSTITIAL_ID');
-  static const _productionRewardedId =
-      String.fromEnvironment('ADMOB_REWARDED_ID');
-  static const _productionAppOpenId =
-      String.fromEnvironment('ADMOB_APP_OPEN_ID');
+  static const _productionBannerId = String.fromEnvironment('ADMOB_BANNER_ID');
+  static const _productionInterstitialId = String.fromEnvironment(
+    'ADMOB_INTERSTITIAL_ID',
+  );
+  static const _productionRewardedId = String.fromEnvironment(
+    'ADMOB_REWARDED_ID',
+  );
+  static const _productionAppOpenId = String.fromEnvironment(
+    'ADMOB_APP_OPEN_ID',
+  );
 
   static bool get _productionIdsPresent =>
       _productionBannerId.isNotEmpty &&
@@ -39,31 +37,35 @@ class AdsService {
       _productionRewardedId != _rewardedTestId &&
       _productionAppOpenId != _appOpenTestId;
 
-  static String get bannerId =>
-      kReleaseMode && _productionIdsPresent
-          ? _productionBannerId
-          : _bannerTestId;
-  static String get interstitialId =>
-      kReleaseMode && _productionIdsPresent
-          ? _productionInterstitialId
-          : _interstitialTestId;
-  static String get rewardedId =>
-      kReleaseMode && _productionIdsPresent
-          ? _productionRewardedId
-          : _rewardedTestId;
-  static String get appOpenId =>
-      kReleaseMode && _productionIdsPresent
-          ? _productionAppOpenId
-          : _appOpenTestId;
+  static String get bannerId => kReleaseMode && _productionIdsPresent
+      ? _productionBannerId
+      : _bannerTestId;
+  static String get interstitialId => kReleaseMode && _productionIdsPresent
+      ? _productionInterstitialId
+      : _interstitialTestId;
+  static String get rewardedId => kReleaseMode && _productionIdsPresent
+      ? _productionRewardedId
+      : _rewardedTestId;
+  static String get appOpenId => kReleaseMode && _productionIdsPresent
+      ? _productionAppOpenId
+      : _appOpenTestId;
 
-  static const int _defaultInterstitialEvery =
-      int.fromEnvironment('INTERSTITIAL_EVERY', defaultValue: 3);
+  static const int _defaultInterstitialEvery = int.fromEnvironment(
+    'INTERSTITIAL_EVERY',
+    defaultValue: 3,
+  );
 
   int _interstitialEvery = _defaultInterstitialEvery;
 
   static const _sessionKey = 'pdfmate_ad_sessions';
   static const _lastAppOpenKey = 'pdfmate_last_app_open_ms';
 
+  final ValueNotifier<bool> adsAllowed = ValueNotifier<bool>(false);
+  final Set<BannerAd> _banners = {};
+  int _consentGeneration = 0;
+  bool _loadingInterstitial = false;
+  bool _loadingRewarded = false;
+  bool _loadingAppOpen = false;
   bool _initialized = false;
   bool _canRequestAds = false;
   bool _privacyOptionsRequired = false;
@@ -90,6 +92,7 @@ class AdsService {
     return last != null &&
         DateTime.now().difference(last) < const Duration(minutes: 2);
   }
+
   void configureInterstitialFrequency(int every) {
     _interstitialEvery = every.clamp(2, 10);
   }
@@ -98,15 +101,23 @@ class AdsService {
     _appOpenEnabled = enabled;
   }
 
-
   bool get productionConfigured => _productionIdsPresent;
 
-  bool get productionRevenueMode =>
-      kReleaseMode && _productionIdsPresent;
+  bool get productionRevenueMode => kReleaseMode && _productionIdsPresent;
 
   bool get usingTestIds => !productionRevenueMode;
 
   Future<void> initialize() async {
+    try {
+      await _initialize();
+    } catch (_) {
+      _initialized = false;
+      _clearAds();
+      rethrow;
+    }
+  }
+
+  Future<void> _initialize() async {
     if (_initialized) return;
     _initialized = true;
 
@@ -131,36 +142,79 @@ class AdsService {
           if (formError != null) {
             debugPrint('UMP form error: ${formError.message}');
           }
-          await _finishConsent();
-          if (!completer.isCompleted) completer.complete();
+          await _completeConsent(completer);
         });
       },
       (error) async {
         debugPrint('UMP update error: ${error.message}');
-        await _finishConsent();
-        if (!completer.isCompleted) completer.complete();
+        await _completeConsent(completer);
       },
     );
 
-    await completer.future;
+    await completer.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        _initialized = false;
+      },
+    );
+  }
+
+  Future<void> _completeConsent(Completer<void> completer) async {
+    try {
+      await _finishConsent();
+    } catch (e) {
+      debugPrint('Consent initialization failed: $e');
+      _initialized = false;
+      _clearAds();
+    } finally {
+      if (!completer.isCompleted) completer.complete();
+    }
+  }
+
+  void _clearAds() {
+    _canRequestAds = false;
+    _consentGeneration++;
+    _loadingInterstitial = _loadingRewarded = _loadingAppOpen = false;
+    _interstitial?.dispose();
+    _rewarded?.dispose();
+    _appOpenAd?.dispose();
+    _interstitial = null;
+    _rewarded = null;
+    _appOpenAd = null;
+    _appOpenLoadTime = null;
+    for (final banner in _banners.toList()) {
+      banner.dispose();
+    }
+    _banners.clear();
+    final pending = _rewardedLoadCompleter;
+    if (pending != null && !pending.isCompleted) pending.complete(false);
+    _rewardedLoadCompleter = null;
+    adsAllowed.value = false;
   }
 
   Future<void> _finishConsent() async {
     _canRequestAds = await ConsentInformation.instance.canRequestAds();
-    _privacyOptionsRequired = await ConsentInformation.instance
+    _privacyOptionsRequired =
+        await ConsentInformation.instance
             .getPrivacyOptionsRequirementStatus() ==
         PrivacyOptionsRequirementStatus.required;
 
-    if (!_canRequestAds) return;
+    if (!_canRequestAds) {
+      _clearAds();
+      return;
+    }
 
     await MobileAds.instance.initialize();
+    if (!_canRequestAds) return;
+    adsAllowed.value = true;
     _loadInterstitial();
     _loadRewarded();
     _loadAppOpen();
 
     AppStateEventNotifier.startListening();
-    _appStateSubscription ??=
-        AppStateEventNotifier.appStateStream.listen((state) {
+    _appStateSubscription ??= AppStateEventNotifier.appStateStream.listen((
+      state,
+    ) {
       if (state == AppState.foreground) {
         unawaited(showAppOpenIfEligible());
       }
@@ -168,13 +222,16 @@ class AdsService {
   }
 
   Future<void> showPrivacyOptions() async {
+    // A changed privacy choice can still permit non-personalized ads. Always
+    // discard inventory requested under the old choice, even when UMP later
+    // returns canRequestAds=true again.
+    _clearAds();
     final completer = Completer<void>();
     ConsentForm.showPrivacyOptionsForm((error) async {
       if (error != null) {
         debugPrint('Privacy options error: ${error.message}');
       }
-      await _finishConsent();
-      if (!completer.isCompleted) completer.complete();
+      await _completeConsent(completer);
     });
     await completer.future;
   }
@@ -182,31 +239,60 @@ class AdsService {
   BannerAd? createBanner({required VoidCallback onChanged}) {
     if (!_canRequestAds) return null;
 
+    final generation = _consentGeneration;
     final ad = BannerAd(
       adUnitId: bannerId,
       request: const AdRequest(),
       size: AdSize.banner,
       listener: BannerAdListener(
-        onAdLoaded: (_) => onChanged(),
+        onAdLoaded: (ad) {
+          if (!_canRequestAds || generation != _consentGeneration) {
+            ad.dispose();
+            return;
+          }
+          onChanged();
+        },
         onAdFailedToLoad: (ad, error) {
           debugPrint('Banner failed: $error');
+          _banners.remove(ad);
           ad.dispose();
           onChanged();
         },
       ),
     );
+    _banners.add(ad);
     ad.load();
     return ad;
   }
 
+  bool isBannerActive(BannerAd ad) => _canRequestAds && _banners.contains(ad);
+
+  void releaseBanner(BannerAd? ad) {
+    if (ad == null) return;
+    _banners.remove(ad);
+    ad.dispose();
+  }
+
   void _loadInterstitial() {
-    if (!_canRequestAds || _interstitial != null) return;
+    if (!_canRequestAds || _interstitial != null || _loadingInterstitial)
+      return;
+    _loadingInterstitial = true;
+    final generation = _consentGeneration;
     InterstitialAd.load(
       adUnitId: interstitialId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (ad) => _interstitial = ad,
+        onAdLoaded: (ad) {
+          if (generation != _consentGeneration || !_canRequestAds) {
+            ad.dispose();
+            return;
+          }
+          _loadingInterstitial = false;
+          _interstitial = ad;
+        },
         onAdFailedToLoad: (error) {
+          if (generation != _consentGeneration) return;
+          _loadingInterstitial = false;
           debugPrint('Interstitial failed: $error');
           _interstitial = null;
         },
@@ -215,6 +301,7 @@ class AdsService {
   }
 
   Future<void> recordCompletedOperation() async {
+    if (!_canRequestAds) return;
     _completedOperations++;
     if (recentlyShowedFullScreenAd) return;
     if (_interstitialEvery <= 0 ||
@@ -252,12 +339,19 @@ class AdsService {
   }
 
   void _loadRewarded() {
-    if (!_canRequestAds || _rewarded != null) return;
+    if (!_canRequestAds || _rewarded != null || _loadingRewarded) return;
+    _loadingRewarded = true;
+    final generation = _consentGeneration;
     RewardedAd.load(
       adUnitId: rewardedId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {
+          if (generation != _consentGeneration || !_canRequestAds) {
+            ad.dispose();
+            return;
+          }
+          _loadingRewarded = false;
           _rewarded = ad;
           final completer = _rewardedLoadCompleter;
           if (completer != null && !completer.isCompleted) {
@@ -266,6 +360,8 @@ class AdsService {
           _rewardedLoadCompleter = null;
         },
         onAdFailedToLoad: (error) {
+          if (generation != _consentGeneration) return;
+          _loadingRewarded = false;
           debugPrint('Rewarded failed: $error');
           _rewarded = null;
           final completer = _rewardedLoadCompleter;
@@ -309,7 +405,8 @@ class AdsService {
   Future<RewardedAdOutcome> showRewardedGate() async {
     if (_isShowingFullScreenAd) return RewardedAdOutcome.unavailable;
     final ready = await ensureRewardedReady();
-    if (!ready) return RewardedAdOutcome.unavailable;
+    if (!ready || !_canRequestAds || _isShowingFullScreenAd)
+      return RewardedAdOutcome.unavailable;
 
     final ad = _rewarded;
     if (ad == null) return RewardedAdOutcome.unavailable;
@@ -356,17 +453,26 @@ class AdsService {
       (await showRewardedGate()) == RewardedAdOutcome.earned;
 
   void _loadAppOpen() {
-    if (!_canRequestAds || _appOpenAd != null) return;
+    if (!_canRequestAds || _appOpenAd != null || _loadingAppOpen) return;
+    _loadingAppOpen = true;
+    final generation = _consentGeneration;
 
     AppOpenAd.load(
       adUnitId: appOpenId,
       request: const AdRequest(),
       adLoadCallback: AppOpenAdLoadCallback(
         onAdLoaded: (ad) {
+          if (generation != _consentGeneration || !_canRequestAds) {
+            ad.dispose();
+            return;
+          }
+          _loadingAppOpen = false;
           _appOpenAd = ad;
           _appOpenLoadTime = DateTime.now();
         },
         onAdFailedToLoad: (error) {
+          if (generation != _consentGeneration) return;
+          _loadingAppOpen = false;
           debugPrint('App open failed: $error');
           _appOpenAd = null;
           _appOpenLoadTime = null;
@@ -377,9 +483,19 @@ class AdsService {
 
   Future<void> showAppOpenIfEligible() async {
     // Google recommends waiting until users have used the app a few times.
-    if (!_appOpenEnabled || !_canRequestAds || _sessionCount < 3 || _isShowingFullScreenAd || recentlyShowedFullScreenAd) return;
+    if (!_appOpenEnabled ||
+        !_canRequestAds ||
+        _sessionCount < 3 ||
+        _isShowingFullScreenAd ||
+        recentlyShowedFullScreenAd)
+      return;
 
     final prefs = await SharedPreferences.getInstance();
+    if (!_appOpenEnabled ||
+        !_canRequestAds ||
+        _isShowingFullScreenAd ||
+        recentlyShowedFullScreenAd)
+      return;
     final lastMs = prefs.getInt(_lastAppOpenKey);
     if (lastMs != null) {
       final lastShown = DateTime.fromMillisecondsSinceEpoch(lastMs);
@@ -430,17 +546,9 @@ class AdsService {
   }
 
   Future<void> dispose() async {
+    _clearAds();
     await _appStateSubscription?.cancel();
-    _interstitial?.dispose();
-    _rewarded?.dispose();
-    _appOpenAd?.dispose();
-    _interstitial = null;
-    _rewarded = null;
-    _appOpenAd = null;
-    final pending = _rewardedLoadCompleter;
-    if (pending != null && !pending.isCompleted) {
-      pending.complete(false);
-    }
-    _rewardedLoadCompleter = null;
+    _appStateSubscription = null;
+    _initialized = false;
   }
 }

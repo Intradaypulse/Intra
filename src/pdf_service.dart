@@ -8,12 +8,35 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart' as pdf_format;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'pdf_rules.dart';
+import 'scan_temp_session.dart';
+import 'serial_executor.dart';
+
+class PdfOperationCancelled implements Exception {
+  @override
+  String toString() => 'Operation cancelled.';
+}
+
+class PdfOperationControl {
+  PdfOperationControl({this.onProgress});
+  final void Function(int completed, int total)? onProgress;
+  bool _cancelled = false;
+  void cancel() => _cancelled = true;
+  void check() {
+    if (_cancelled) throw PdfOperationCancelled();
+  }
+
+  void progress(int completed, int total) {
+    check();
+    onProgress?.call(completed, total);
+  }
+}
 
 enum CompressionPreset { highQuality, balanced, smallest }
 
@@ -33,22 +56,23 @@ class CompressionResult {
   double get savedPercent => originalBytes <= 0
       ? 0
       : ((originalBytes - outputBytes) / originalBytes * 100)
-          .clamp(-999, 100)
-          .toDouble();
+            .clamp(-999, 100)
+            .toDouble();
 }
 
 class PdfService {
   PdfService({
     Future<Directory> Function()? documentsDirectoryProvider,
     Future<Directory> Function()? temporaryDirectoryProvider,
-  })  : _documentsDirectoryProvider =
-            documentsDirectoryProvider ?? getApplicationDocumentsDirectory,
-        _temporaryDirectoryProvider =
-            temporaryDirectoryProvider ?? getTemporaryDirectory;
+  }) : _documentsDirectoryProvider =
+           documentsDirectoryProvider ?? getApplicationDocumentsDirectory,
+       _temporaryDirectoryProvider =
+           temporaryDirectoryProvider ?? getTemporaryDirectory;
 
   final Future<Directory> Function() _documentsDirectoryProvider;
   final Future<Directory> Function() _temporaryDirectoryProvider;
   final Set<String> _managedTemporaryPaths = <String>{};
+  static final Set<String> _activeTemporaryPaths = <String>{};
 
   final ImagePicker imagePicker = ImagePicker();
 
@@ -65,16 +89,17 @@ class PdfService {
       '${DateTime.now().microsecondsSinceEpoch}.$extension',
     );
     _managedTemporaryPaths.add(file.path);
+    _activeTemporaryPaths.add(file.path);
     return file;
   }
 
   bool isManagedTemporaryFile(File file) =>
-      _managedTemporaryPaths.contains(file.path) ||
-      isPdfMateManagedTempPath(file.path);
+      _managedTemporaryPaths.contains(file.path);
 
   Future<void> secureDeleteTemporary(File? file) async {
     if (file == null || !isManagedTemporaryFile(file)) return;
     _managedTemporaryPaths.remove(file.path);
+    _activeTemporaryPaths.remove(file.path);
     try {
       if (!await file.exists()) return;
       final length = await file.length();
@@ -106,11 +131,26 @@ class PdfService {
     final dir = await _tmp();
     if (!await dir.exists()) return;
     await for (final entity in dir.list(followLinks: false)) {
-      if (entity is File && isPdfMateManagedTempPath(entity.path)) {
+      if (entity is! File) continue;
+      if (isPdfMateManagedTempPath(entity.path) &&
+          !_activeTemporaryPaths.contains(entity.path)) {
         _managedTemporaryPaths.add(entity.path);
         await secureDeleteTemporary(entity);
+      } else if (_isScanPageInTemp(entity, dir)) {
+        // A scan still being assembled should not be removed by a second
+        // PdfService instance. Old pages can survive process termination.
+        final modified = await entity.lastModified();
+        if (DateTime.now().difference(modified) > const Duration(hours: 1)) {
+          await ScanTempSession().deletePath(entity.path);
+        }
       }
     }
+  }
+
+  bool _isScanPageInTemp(File file, Directory temp) {
+    final name = file.uri.pathSegments.last;
+    return file.parent.absolute.path == temp.absolute.path &&
+        RegExp(r'^pdfmate_scan_[A-Za-z0-9_-]+\.(jpg|jpeg|png)$').hasMatch(name);
   }
 
   String _safe(String value) =>
@@ -118,13 +158,43 @@ class PdfService {
 
   Future<File> _newFile(String prefix) async {
     final dir = await _docs();
-    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final stamp = DateTime.now().microsecondsSinceEpoch;
     return File('${dir.path}/${_safe(prefix)}_$stamp.pdf');
   }
 
+  static final _renameQueue = SerialExecutor();
 
+  Future<File> renamePdf(File source, String requestedName) =>
+      _renameQueue.run(() => _renamePdf(source, requestedName));
 
-  Future<File> importPdfFile(String sourcePath, {String prefix = 'Scan'}) async {
+  Future<File> _renamePdf(File source, String requestedName) async {
+    final name = requestedName
+        .trim()
+        .replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
+        .replaceAll(RegExp(r'[^A-Za-z0-9._ -]+'), '_');
+    if (name.isEmpty || name == '.' || name == '..') {
+      throw const FormatException('Enter a valid file name.');
+    }
+    final destination = File('${source.parent.path}/$name.pdf');
+    if (source.absolute.path == destination.absolute.path) return source;
+    // App rename actions are serialized; refuse existing destinations.
+    if (await destination.exists()) {
+      throw const FileSystemException('A PDF with this name already exists.');
+    }
+    try {
+      await source.copy(destination.path);
+      await source.delete();
+      return destination;
+    } catch (_) {
+      if (await destination.exists()) await destination.delete();
+      rethrow;
+    }
+  }
+
+  Future<File> importPdfFile(
+    String sourcePath, {
+    String prefix = 'Scan',
+  }) async {
     final source = File(sourcePath);
     if (!await source.exists()) {
       throw FileSystemException('Source PDF does not exist.', sourcePath);
@@ -147,9 +217,7 @@ class PdfService {
     );
   }
 
-  Future<Uint8List?> captureScannedPage({
-    String filter = 'enhance',
-  }) async {
+  Future<Uint8List?> captureScannedPage({String filter = 'enhance'}) async {
     final shot = await imagePicker.pickImage(
       source: ImageSource.camera,
       imageQuality: 95,
@@ -195,13 +263,9 @@ class PdfService {
     final pdf = Pdf();
     final sink = await FileSink.create(output);
     try {
-      await pdf.imagesToPdf(
-        [
-          for (final image in images)
-            FileSource(File(image.path)) as DataSource,
-        ],
-        sink,
-      );
+      await pdf.imagesToPdf([
+        for (final image in images) FileSource(File(image.path)) as DataSource,
+      ], sink);
       await sink.close();
       return output;
     } catch (_) {
@@ -212,19 +276,15 @@ class PdfService {
     }
   }
 
-  Future<File> _imagesToPdfBytes(
-    List<Uint8List> images,
-    String prefix,
-  ) async {
+  Future<File> _imagesToPdfBytes(List<Uint8List> images, String prefix) async {
     final document = pw.Document();
     for (final bytes in images) {
       final image = pw.MemoryImage(bytes);
       document.addPage(
         pw.Page(
           margin: const pw.EdgeInsets.all(14),
-          build: (_) => pw.Center(
-            child: pw.Image(image, fit: pw.BoxFit.contain),
-          ),
+          build: (_) =>
+              pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain)),
         ),
       );
     }
@@ -234,14 +294,14 @@ class PdfService {
   }
 
   Future<PlatformFile?> pickPdf() => FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-      );
+    type: FileType.custom,
+    allowedExtensions: const ['pdf'],
+  );
 
   Future<List<PlatformFile>> pickPdfs() => FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-      );
+    type: FileType.custom,
+    allowedExtensions: const ['pdf'],
+  );
 
   Future<File> _materialize(PlatformFile picked) async {
     final path = picked.path;
@@ -310,15 +370,11 @@ class PdfService {
     final pdf = Pdf();
     final sinks = <MemorySink>[];
     try {
-      await pdf.split(
-        FileSource(sourceFile),
-        (index) {
-          final sink = MemorySink();
-          sinks.add(sink);
-          return sink;
-        },
-        every: 1,
-      );
+      await pdf.split(FileSource(sourceFile), (index) {
+        final sink = MemorySink();
+        sinks.add(sink);
+        return sink;
+      }, every: 1);
       final outputs = <File>[];
       for (var i = 0; i < sinks.length; i++) {
         final file = await _newFile('Split_${i + 1}');
@@ -339,11 +395,7 @@ class PdfService {
     final pdf = Pdf();
     final sink = await FileSink.create(outputFile);
     try {
-      await pdf.rotateAllPages(
-        FileSource(sourceFile),
-        sink,
-        degrees: 90,
-      );
+      await pdf.rotateAllPages(FileSource(sourceFile), sink, degrees: 90);
       await sink.close();
       return outputFile;
     } catch (_) {
@@ -471,17 +523,24 @@ class PdfService {
         size: const PdfRenderSize(maxWidth: 2000, maxHeight: 2800),
       )) {
         final decoded = img.decodePng(page.data);
-        if (decoded == null) continue;
+        if (decoded == null) throw StateError('Could not decode page $pageNo.');
         final jpgBytes = img.encodeJpg(decoded, quality: 88);
         final dir = await _docs();
         final path =
             '${dir.path}/PDF_Page_${pageNo}_${DateTime.now().millisecondsSinceEpoch}.jpg';
         final file = File(path);
-        await file.writeAsBytes(jpgBytes, flush: true);
         outputs.add(file);
+        await file.writeAsBytes(jpgBytes, flush: true);
         pageNo++;
       }
       return outputs;
+    } catch (_) {
+      for (final output in outputs) {
+        try {
+          if (await output.exists()) await output.delete();
+        } catch (_) {}
+      }
+      rethrow;
     } finally {
       await doc?.dispose();
       await pdf.dispose();
@@ -528,7 +587,6 @@ class PdfService {
       await pdf.dispose();
     }
   }
-
 
   Future<File?> pickPdfFile() async {
     final picked = await pickPdf();
@@ -604,11 +662,7 @@ class PdfService {
           CompressionPreset.balanced => PdfImagePolicy.ebook,
           CompressionPreset.smallest => PdfImagePolicy.screen,
         };
-        await pdf.compress(
-          FileSource(readable),
-          sink,
-          images: policy,
-        );
+        await pdf.compress(FileSource(readable), sink, images: policy);
         await sink.close();
       } catch (_) {
         await sink.close();
@@ -658,54 +712,58 @@ class PdfService {
     required Map<int, int> rotations,
     String? password,
   }) async {
-    if (pageOrder.isEmpty) {
+    if (pageOrder.isEmpty)
       throw ArgumentError('At least one page must remain.');
-    }
-
-    final extracted = await _newFile('Organized_Work');
-    final pdf1 = Pdf();
-    final sink1 = await FileSink.create(extracted);
-    try {
-      await pdf1.extractPages(
-        FileSource(source),
-        sink1,
-        pages: pageOrder,
-        password: password,
-      );
-      await sink1.close();
-    } catch (_) {
-      await sink1.close();
-      rethrow;
-    } finally {
-      await pdf1.dispose();
-    }
-
-    final normalizedRotations = <int, int>{
-      for (final entry in rotations.entries)
-        if (entry.value % 360 != 0) entry.key: entry.value,
-    };
-
-    if (normalizedRotations.isEmpty) return extracted;
-
+    final work = await _newManagedTempFile('organizer');
     final output = await _newFile('Organized');
-    final pdf2 = Pdf();
-    final sink2 = await FileSink.create(output);
+    final engine = Pdf();
     try {
-      await pdf2.rotatePages(
-        FileSource(extracted),
-        sink2,
-        pages: normalizedRotations,
-      );
-      await sink2.close();
+      final count = await pageCount(source, password: password);
+      if (pageOrder.any((page) => page < 0 || page >= count)) {
+        throw RangeError('A selected page is outside the document.');
+      }
+      if (rotations.entries.any(
+        (entry) =>
+            entry.key < 0 ||
+            entry.key >= pageOrder.length ||
+            entry.value % 90 != 0,
+      )) {
+        throw ArgumentError(
+          'Page rotations must use valid output pages and multiples of 90 degrees.',
+        );
+      }
+      final sink = await FileSink.create(work);
       try {
-        await extracted.delete();
-      } catch (_) {}
+        await engine.extractPages(
+          FileSource(source),
+          sink,
+          pages: pageOrder,
+          password: password,
+        );
+      } finally {
+        await sink.close();
+      }
+      final normalized = <int, int>{
+        for (final entry in rotations.entries)
+          if (entry.value % 360 != 0) entry.key: entry.value,
+      };
+      if (normalized.isEmpty) {
+        await work.copy(output.path);
+      } else {
+        final sink = await FileSink.create(output);
+        try {
+          await engine.rotatePages(FileSource(work), sink, pages: normalized);
+        } finally {
+          await sink.close();
+        }
+      }
       return output;
     } catch (_) {
-      await sink2.close();
+      if (await output.exists()) await output.delete();
       rethrow;
     } finally {
-      await pdf2.dispose();
+      await engine.dispose();
+      await secureDeleteTemporary(work);
     }
   }
 
@@ -745,11 +803,7 @@ class PdfService {
     final pdf = Pdf();
     final sink = await FileSink.create(output);
     try {
-      await pdf.decrypt(
-        FileSource(source),
-        sink,
-        password: password,
-      );
+      await pdf.decrypt(FileSource(source), sink, password: password);
       await sink.close();
       return output;
     } catch (_) {
@@ -819,14 +873,9 @@ class PdfService {
     }
   }
 
-  Future<PdfDoc> openPdfDoc(
-    Pdf pdf,
-    File source, {
-    String? password,
-  }) {
+  Future<PdfDoc> openPdfDoc(Pdf pdf, File source, {String? password}) {
     return pdf.open(FileSource(source), password: password);
   }
-
 
   Future<Uint8List?> renderFirstThumbnail(
     File source, {
@@ -850,10 +899,7 @@ class PdfService {
     }
   }
 
-  Future<List<PdfPageInfo>> pageInfos(
-    File source, {
-    String? password,
-  }) async {
+  Future<List<PdfPageInfo>> pageInfos(File source, {String? password}) async {
     final pdf = Pdf();
     PdfDoc? doc;
     try {
@@ -865,7 +911,6 @@ class PdfService {
     }
   }
 
-
   Future<List<File>> splitEveryN(
     File source,
     int every, {
@@ -873,54 +918,36 @@ class PdfService {
   }) async {
     if (every < 1) throw ArgumentError.value(every, 'every');
     final count = await pageCount(source, password: password);
-    final chunks = splitChunkCount(count, every);
     final files = <File>[];
-    final sinks = <FileSink>[];
-    File readable = source;
-    File? decryptedTemp;
-
+    final engine = Pdf();
     try {
-      if (password != null && password.isNotEmpty) {
-        decryptedTemp = await decryptToTemporary(source, password);
-        readable = decryptedTemp;
-      }
-
-      for (var i = 0; i < chunks; i++) {
+      for (var start = 0; start < count; start += every) {
         final file = await _newFile(
-          every == 1 ? 'Page_${i + 1}' : 'Split_${i + 1}',
+          every == 1 ? 'Page_${start + 1}' : 'Split_${files.length + 1}',
         );
         files.add(file);
-        sinks.add(await FileSink.create(file));
-      }
-
-      final pdf = Pdf();
-      try {
-        await pdf.split(
-          FileSource(readable),
-          (index) => sinks[index],
-          every: every,
-        );
-        for (final sink in sinks) {
+        final sink = await FileSink.create(file);
+        try {
+          await engine.extractPages(
+            FileSource(source),
+            sink,
+            pages: [
+              for (var i = start; i < math.min(start + every, count); i++) i,
+            ],
+            password: password,
+          );
+        } finally {
           await sink.close();
         }
-        return files;
-      } catch (_) {
-        for (final sink in sinks) {
-          try {
-            await sink.close();
-          } catch (_) {}
-        }
-        for (final file in files) {
-          try {
-            await file.delete();
-          } catch (_) {}
-        }
-        rethrow;
-      } finally {
-        await pdf.dispose();
       }
+      return files;
+    } catch (_) {
+      for (final file in files) {
+        if (await file.exists()) await file.delete();
+      }
+      rethrow;
     } finally {
-      await secureDeleteTemporary(decryptedTemp);
+      await engine.dispose();
     }
   }
 
@@ -947,11 +974,11 @@ class PdfService {
     }
   }
 
-
   Future<List<String>> ocrPdf(
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
+    PdfOperationControl? control,
   }) async {
     final pdf = Pdf();
     PdfDoc? doc;
@@ -964,12 +991,10 @@ class PdfService {
         pages: const PdfPages.all(),
         size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500),
       )) {
-        final file = await _newManagedTempFile(
-          'ocr_$index',
-          extension: 'png',
-        );
-        await file.writeAsBytes(page.data, flush: true);
+        control?.progress(index, doc.pageCount);
+        final file = await _newManagedTempFile('ocr_$index', extension: 'png');
         try {
+          await file.writeAsBytes(page.data, flush: true);
           final result = await recognizer.processImage(
             InputImage.fromFilePath(file.path),
           );
@@ -979,6 +1004,7 @@ class PdfService {
         }
         index++;
       }
+      control?.check();
       return texts;
     } finally {
       await recognizer.close();
@@ -987,10 +1013,7 @@ class PdfService {
     }
   }
 
-  Future<bool> hasDigitalSignatures(
-    File source, {
-    String? password,
-  }) async {
+  Future<bool> hasDigitalSignatures(File source, {String? password}) async {
     final pdf = Pdf();
     PdfDoc? doc;
     try {
@@ -1006,6 +1029,7 @@ class PdfService {
     File source, {
     required TextRecognitionScript script,
     String? password,
+    PdfOperationControl? control,
   }) async {
     final engine = Pdf();
     PdfDoc? doc;
@@ -1020,8 +1044,9 @@ class PdfService {
       editor = await engine.edit(FileSource(source), password: password);
 
       for (var index = 0; index < doc.pageCount; index++) {
+        control?.progress(index, doc.pageCount);
         final existing = await doc.extract(pages: PdfPages.single(index));
-        if (existing.trim().isNotEmpty) continue;
+        final existingMatches = <String, List<SearchResult>>{};
 
         Uint8List? pageBytes;
         await for (final rendered in doc.render(
@@ -1031,19 +1056,20 @@ class PdfService {
           pageBytes = rendered.data;
           break;
         }
-        if (pageBytes == null) continue;
+        if (pageBytes == null)
+          throw StateError('Could not render page ${index + 1}.');
 
         final decoded = img.decodePng(pageBytes);
-        if (decoded == null) continue;
+        if (decoded == null)
+          throw StateError('Could not decode page ${index + 1}.');
 
         final tempImage = await _newManagedTempFile(
           'native_ocr_$index',
           extension: 'png',
         );
-        await tempImage.writeAsBytes(pageBytes, flush: true);
-
         RecognizedText recognized;
         try {
+          await tempImage.writeAsBytes(pageBytes, flush: true);
           recognized = await recognizer.processImage(
             InputImage.fromFilePath(tempImage.path),
           );
@@ -1074,8 +1100,27 @@ class PdfService {
               );
               if (placement.width <= 0 || placement.height <= 0) continue;
 
-              final yFromBottom =
-                  math.max(0.0, pageHeight - placement.top - placement.height);
+              final yFromBottom = math.max(
+                0.0,
+                pageHeight - placement.top - placement.height,
+              );
+
+              if (existing.trim().isNotEmpty) {
+                final matches = existingMatches[text] ??= await doc.search(
+                  query: text,
+                  pages: PdfPages.single(index),
+                );
+                final cx = placement.left + placement.width / 2;
+                final cy = yFromBottom + placement.height / 2;
+                if (matches.any(
+                  (m) =>
+                      cx >= m.rect.x &&
+                      cx <= m.rect.x + m.rect.width &&
+                      cy >= m.rect.y &&
+                      cy <= m.rect.y + m.rect.height,
+                ))
+                  continue;
+              }
 
               await editor.addWatermark(
                 index,
@@ -1095,7 +1140,7 @@ class PdfService {
                 layer: PdfWatermarkLayer.background,
               );
 
-              if (pageTokens.length < 3 && text.runes.length >= 2) {
+              if (text.isNotEmpty) {
                 pageTokens.add(text);
               }
               changed = true;
@@ -1108,15 +1153,14 @@ class PdfService {
 
       if (!changed) {
         await source.copy(output.path);
+        control?.check();
         return output;
       }
 
+      control?.check();
       final sink = await FileSink.create(output);
       try {
-        await editor.save(
-          sink,
-          options: const PdfSaveOptions.incremental(),
-        );
+        await editor.save(sink, options: const PdfSaveOptions.incremental());
         await sink.close();
       } catch (_) {
         await sink.close();
@@ -1141,10 +1185,9 @@ class PdfService {
               pages: PdfPages.single(entry.key),
             );
             final normalized = extracted.replaceAll(RegExp(r'\s+'), '');
-            final matched = entry.value.any(
-              (token) => normalized.contains(
-                token.replaceAll(RegExp(r'\s+'), ''),
-              ),
+            final matched = entry.value.every(
+              (token) =>
+                  normalized.contains(token.replaceAll(RegExp(r'\s+'), '')),
             );
             if (!matched) {
               throw StateError(
@@ -1159,7 +1202,15 @@ class PdfService {
         }
       }
 
+      control?.check();
       return output;
+    } catch (_) {
+      // An extraction/encoding failure must not leave a misleading partial
+      // "searchable" document in the user's library.
+      try {
+        if (await output.exists()) await output.delete();
+      } catch (_) {}
+      rethrow;
     } finally {
       await recognizer.close();
       await editor?.dispose();
@@ -1172,12 +1223,198 @@ class PdfService {
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
-  }) {
+    PdfOperationControl? control,
+  }) async {
+    if (script == TextRecognitionScript.devanagiri) {
+      return _makeDevanagariSearchablePdf(
+        source,
+        password: password,
+        control: control,
+      );
+    }
     return _makeSearchablePdfPreservingOriginal(
       source,
       script: script,
       password: password,
+      control: control,
     );
+  }
+
+  /// The native watermark font cannot encode Devanagari. Build a new PDF from
+  /// page images and a bundled Unicode font so extracted Hindi text is real.
+  /// This path changes the PDF's structure; the UI discloses that tradeoff.
+  Future<File> _makeDevanagariSearchablePdf(
+    File source, {
+    String? password,
+    PdfOperationControl? control,
+  }) async {
+    final bytes = await rootBundle.load(
+      'assets/fonts/NotoSansDevanagariOCR.ttf',
+    );
+    final font = pw.Font.ttf(bytes);
+    final original = Pdf();
+    PdfDoc? doc;
+    final recognizer = TextRecognizer(script: TextRecognitionScript.devanagiri);
+    final output = await _newFile('Searchable_Hindi');
+    final pages = <File>[];
+    final expected = <int, List<String>>{};
+    var temporaryBytes = 0;
+    try {
+      doc = await original.open(FileSource(source), password: password);
+      for (var index = 0; index < doc.pageCount; index++) {
+        control?.progress(index, doc.pageCount);
+        Uint8List? renderedBytes;
+        await for (final rendered in doc.render(
+          pages: PdfPages.single(index),
+          size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500),
+        )) {
+          renderedBytes = rendered.data;
+          break;
+        }
+        if (renderedBytes == null) {
+          throw StateError('Could not render page ${index + 1} for OCR.');
+        }
+        final decoded = img.decodePng(renderedBytes);
+        if (decoded == null) {
+          throw StateError('Could not decode page ${index + 1} for OCR.');
+        }
+        final input = await _newManagedTempFile(
+          'hindi_input_$index',
+          extension: 'png',
+        );
+        RecognizedText recognized;
+        try {
+          await input.writeAsBytes(renderedBytes, flush: true);
+          recognized = await recognizer.processImage(
+            InputImage.fromFilePath(input.path),
+          );
+        } finally {
+          await secureDeleteTemporary(input);
+        }
+
+        final page = doc.pages[index];
+        final width = page.effectiveWidth;
+        final height = page.effectiveHeight;
+        final overlays = <pw.Widget>[];
+        expected[index] = [];
+        for (final block in recognized.blocks) {
+          for (final line in block.lines) {
+            for (final element in line.elements) {
+              if (element.text.trim().isEmpty) continue;
+              final rect = mapOcrRectToPdf(
+                leftPx: element.boundingBox.left,
+                topPx: element.boundingBox.top,
+                widthPx: element.boundingBox.width,
+                heightPx: element.boundingBox.height,
+                imageWidthPx: decoded.width.toDouble(),
+                imageHeightPx: decoded.height.toDouble(),
+                pdfWidthPt: width,
+                pdfHeightPt: height,
+              );
+              if (rect.width <= 0 || rect.height <= 0) continue;
+              expected[index]!.add(element.text);
+              overlays.add(
+                pw.Positioned(
+                  left: rect.left,
+                  top: rect.top,
+                  child: pw.Opacity(
+                    opacity: 0.001,
+                    child: pw.Transform.rotate(
+                      angle: -(line.angle ?? 0) * math.pi / 180,
+                      child: pw.Text(
+                        element.text,
+                        style: pw.TextStyle(
+                          font: font,
+                          fontSize: math.max(2, rect.height * 0.8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+        }
+
+        final single = pw.Document(compress: true);
+        single.addPage(
+          pw.Page(
+            pageFormat: pdf_format.PdfPageFormat(width, height),
+            margin: pw.EdgeInsets.zero,
+            build: (_) => pw.Stack(
+              children: [
+                pw.Positioned.fill(
+                  child: pw.Image(
+                    pw.MemoryImage(renderedBytes!),
+                    fit: pw.BoxFit.fill,
+                  ),
+                ),
+                ...overlays,
+              ],
+            ),
+          ),
+        );
+        final tempPage = await _newManagedTempFile('hindi_page_$index');
+        pages.add(tempPage);
+        final bytes = await single.save();
+        temporaryBytes += bytes.length;
+        if (temporaryBytes > 256 * 1024 * 1024) {
+          throw StateError(
+            'OCR temporary storage limit reached (256 MB). Split this PDF into smaller parts.',
+          );
+        }
+        await tempPage.writeAsBytes(bytes, flush: true);
+      }
+      if (pages.isEmpty) throw StateError('PDF has no pages.');
+      control?.check();
+      final merger = Pdf();
+      try {
+        final sink = await FileSink.create(output);
+        try {
+          await merger.merge([
+            for (final page in pages) FileSource(page) as DataSource,
+          ], sink);
+          await sink.close();
+        } catch (_) {
+          await sink.close();
+          rethrow;
+        }
+      } finally {
+        await merger.dispose();
+      }
+      final verifier = Pdf();
+      PdfDoc? verified;
+      try {
+        verified = await verifier.open(FileSource(output));
+        for (final entry in expected.entries) {
+          final text = (await verified.extract(
+            pages: PdfPages.single(entry.key),
+          )).replaceAll(RegExp(r'\s+'), '');
+          if (!entry.value.every(
+            (word) => text.contains(word.replaceAll(RegExp(r'\s+'), '')),
+          )) {
+            throw StateError(
+              'Hindi text verification failed on page ${entry.key + 1}.',
+            );
+          }
+        }
+      } finally {
+        await verified?.dispose();
+        await verifier.dispose();
+      }
+      control?.check();
+      return output;
+    } catch (_) {
+      if (await output.exists()) await output.delete();
+      rethrow;
+    } finally {
+      for (final page in pages) {
+        await secureDeleteTemporary(page);
+      }
+      await recognizer.close();
+      await doc?.dispose();
+      await original.dispose();
+    }
   }
 
   Future<File> decryptToTemporary(File source, String password) async {
@@ -1185,11 +1422,7 @@ class PdfService {
     final pdf = Pdf();
     final sink = await FileSink.create(output);
     try {
-      await pdf.decrypt(
-        FileSource(source),
-        sink,
-        password: password,
-      );
+      await pdf.decrypt(FileSource(source), sink, password: password);
       await sink.close();
       return output;
     } catch (_) {
@@ -1209,13 +1442,9 @@ class PdfService {
     final pdf = Pdf();
     final sink = await FileSink.create(output);
     try {
-      await pdf.imagesToPdf(
-        [
-          for (final path in paths)
-            FileSource(File(path)) as DataSource,
-        ],
-        sink,
-      );
+      await pdf.imagesToPdf([
+        for (final path in paths) FileSource(File(path)) as DataSource,
+      ], sink);
       await sink.close();
       return output;
     } catch (_) {
@@ -1226,12 +1455,12 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      final temp = await _tmp();
       for (final path in paths) {
         try {
           final file = File(path);
-          final name = file.uri.pathSegments.last;
-          if (name.startsWith('pdfmate_scan_') && await file.exists()) {
-            await file.delete();
+          if (_isScanPageInTemp(file, temp) && await file.exists()) {
+            await ScanTempSession().deletePath(path);
           }
         } catch (_) {}
       }
@@ -1328,22 +1557,19 @@ class PdfService {
       var pageNo = 1;
       await for (final page in doc.render(
         pages: const PdfPages.all(),
-        size: PdfRenderSize(
-          maxWidth: maxWidth,
-          maxHeight: maxHeight,
-        ),
+        size: PdfRenderSize(maxWidth: maxWidth, maxHeight: maxHeight),
       )) {
         final decoded = img.decodePng(page.data);
-        if (decoded == null) continue;
+        if (decoded == null) throw StateError('Could not decode page $pageNo.');
         final file = await _newManagedTempFile(
           'jpg_page_$pageNo',
           extension: 'jpg',
         );
+        outputs.add(file);
         await file.writeAsBytes(
           img.encodeJpg(decoded, quality: 90),
           flush: true,
         );
-        outputs.add(file);
         pageNo++;
       }
       return outputs;

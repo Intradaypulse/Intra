@@ -34,6 +34,18 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   final List<File> _pages = [];
   final ScanTempSession _tempSession = ScanTempSession();
 
+  Future<void> _cameraQueue = Future<void>.value();
+  bool _foreground = true;
+  bool _disposed = false;
+
+  Future<void> _queueCamera(Future<void> Function() action) {
+    final next = _cameraQueue.then((_) => action());
+    _cameraQueue = next.catchError((Object error) {
+      _fail('Camera error: $error');
+    });
+    return _cameraQueue;
+  }
+
   bool _starting = false;
   bool _capturing = false;
   bool _autoCapture = true;
@@ -50,7 +62,10 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     _start();
   }
 
-  Future<void> _start() async {
+  Future<void> _start() => _queueCamera(_startCamera);
+
+  Future<void> _startCamera() async {
+    if (_disposed || !_foreground || !mounted) return;
     if (_controller != null || _starting) return;
     _starting = true;
     try {
@@ -76,7 +91,8 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       _controller = controller;
       await controller.initialize();
 
-      if (!mounted) {
+      if (!mounted || _disposed || !_foreground) {
+        _controller = null;
         await controller.dispose();
         return;
       }
@@ -85,11 +101,15 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       if (!mounted) return;
       setState(() {
         _ready = true;
+        _torch = false;
+        _error = null;
         _hint = 'Point at a document';
       });
     } on CameraException catch (e) {
+      await _teardownCamera();
       _fail('Camera unavailable: ${e.description ?? e.code}');
     } catch (e) {
+      await _teardownCamera();
       _fail('Could not start camera: $e');
     } finally {
       _starting = false;
@@ -97,7 +117,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   }
 
   void _fail(String value) {
-    if (!mounted) return;
+    if (!mounted || _disposed) return;
     setState(() {
       _ready = false;
       _error = value;
@@ -176,17 +196,15 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     _detectionSub = _detector
         .detectStream(
           frames.stream,
-          stabilize: CornerStabilizer(
-            smoothing: 0.45,
-            resetDistance: 0.16,
-          ),
+          stabilize: CornerStabilizer(smoothing: 0.45, resetDistance: 0.16),
           minInterval: const Duration(milliseconds: 100),
           sensitivity: DetectionSensitivity.strict,
         )
         .listen(_onDetection);
 
-    final rotation =
-        Platform.isIOS ? 0 : controller.description.sensorOrientation;
+    final rotation = Platform.isIOS
+        ? 0
+        : controller.description.sensorOrientation;
 
     await controller.startImageStream((image) {
       if (!mounted || frames.isClosed || _capturing) return;
@@ -206,20 +224,41 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   }
 
   Future<void> _pauseStream() async {
-    await _detectionSub?.cancel();
-    _detectionSub = null;
-    await _frames?.close();
-    _frames = null;
-
     final controller = _controller;
     if (controller != null && controller.value.isStreamingImages) {
       await controller.stopImageStream();
     }
+    await _detectionSub?.cancel();
+    _detectionSub = null;
+    await _frames?.close();
+    _frames = null;
+  }
+
+  Future<XFile> _queueCapture(CameraController controller) async {
+    XFile? result;
+    Object? failure;
+    await _queueCamera(() async {
+      try {
+        if (_disposed || !_foreground || !identical(controller, _controller)) {
+          throw StateError('Camera is paused.');
+        }
+        await _pauseStream();
+        result = await controller.takePicture();
+      } catch (e) {
+        failure = e;
+      }
+    });
+    if (failure != null) throw failure!;
+    return result!;
   }
 
   Future<void> _captureStill() async {
     final controller = _controller;
-    if (_capturing || controller == null || !controller.value.isInitialized) {
+    if (!_foreground ||
+        _disposed ||
+        _capturing ||
+        controller == null ||
+        !controller.value.isInitialized) {
       return;
     }
 
@@ -233,8 +272,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
 
     String? capturedPhotoPath;
     try {
-      await _pauseStream();
-      final photo = await controller.takePicture();
+      final photo = await _queueCapture(controller);
       final capturedPath = photo.path;
       capturedPhotoPath = capturedPath;
       _tempSession.own(capturedPath);
@@ -259,7 +297,12 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
         final file = File(
           '${dir.path}/pdfmate_scan_${DateTime.now().microsecondsSinceEpoch}.jpg',
         );
-        await file.writeAsBytes(result.bytes, flush: true);
+        try {
+          await file.writeAsBytes(result.bytes, flush: true);
+        } catch (_) {
+          await _tempSession.deletePath(file.path);
+          rethrow;
+        }
         _tempSession.own(file.path);
         if (!mounted) return;
         setState(() {
@@ -277,11 +320,19 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       _capturing = false;
       final current = _controller;
       if (mounted &&
+          !_disposed &&
+          _foreground &&
           current != null &&
           current.value.isInitialized &&
           !current.value.isStreamingImages) {
         try {
-          await _resumeStream(current);
+          await _queueCamera(() async {
+            if (!_disposed &&
+                _foreground &&
+                identical(current, _controller) &&
+                !current.value.isStreamingImages)
+              await _resumeStream(current);
+          });
         } catch (e) {
           if (mounted) setState(() => _error = 'Camera restart failed: $e');
         }
@@ -310,36 +361,40 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       Navigator.of(context).pop<List<String>>();
       return;
     }
-    final paths = _tempSession.handOff(
-      [for (final page in _pages) page.path],
-    );
+    final paths = _tempSession.handOff([for (final page in _pages) page.path]);
     Navigator.of(context).pop<List<String>>(paths);
   }
 
-  Future<void> _teardown() async {
+  Future<void> _teardown() => _queueCamera(_teardownCamera);
+
+  Future<void> _teardownCamera() async {
     final controller = _controller;
-    _controller = null;
     try {
       await _pauseStream();
     } catch (_) {}
+    _controller = null;
     try {
       await controller?.dispose();
     } catch (_) {}
-    if (mounted) setState(() => _ready = false);
+    if (mounted && !_disposed) setState(() => _ready = false);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
+      _foreground = false;
       unawaited(_teardown());
     } else if (state == AppLifecycleState.resumed) {
+      _foreground = true;
       unawaited(_start());
     }
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _foreground = false;
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_teardown());
     unawaited(_tempSession.cleanupOwned());
@@ -430,8 +485,9 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                                     heroTag: 'scanner_shutter',
                                     backgroundColor: Colors.white,
                                     foregroundColor: Colors.black,
-                                    onPressed:
-                                        _capturing ? null : _captureStill,
+                                    onPressed: _capturing
+                                        ? null
+                                        : _captureStill,
                                     child: const Icon(Icons.camera_alt_rounded),
                                   ),
                                 ),
@@ -582,10 +638,7 @@ class _LiveDocumentPainter extends CustomPainter {
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.status,
-    required this.message,
-  });
+  const _StatusChip({required this.status, required this.message});
 
   final AutoCaptureStatus status;
   final String message;
