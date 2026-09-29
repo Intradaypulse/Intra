@@ -16,7 +16,7 @@ For each OEM, record model, OS, commit, pass/fail and evidence for:
 
 | Check | Required observation |
 | --- | --- |
-| Camera and rotation | Capture a printed page upright and after rotating the phone through 90/180/270°. Preview, detected corners, crop and exported page agree; no mirrored or sideways crop. The app UI stays portrait. |
+| Camera and rotation | Test manual and automatic capture of a printed page upright and after rotating the phone through 90/180/270°. Preview, detected corners, crop and exported page agree; no mirrored or sideways crop. The app UI stays portrait. |
 | Torch | Light physically switches on and off, including after opening the camera again. |
 | Background/resume | Press Home while scanning, return after 30 seconds, repeat five times; also lock/unlock. Preview and shutter recover; no camera-in-use error or spontaneous capture. |
 | Crop cancellation | Take a page, cancel manual crop, reopen scanner. No abandoned camera photos remain in app temporary storage. |

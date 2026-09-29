@@ -52,6 +52,14 @@ void main() {
 
       debugPrint('SMOKE: opening camera');
       await tester.tap(find.text('Scan document'));
+      await tester.pump();
+      // Keep an arbitrary physical camera scene from triggering auto-capture
+      // while this test is checking preview, torch and lifecycle recovery.
+      final autoCapture = find.byType(Switch);
+      if (tester.widget<Switch>(autoCapture).value) {
+        await tester.tap(autoCapture);
+        await tester.pump();
+      }
       await tester.pump(const Duration(seconds: 4));
       expect(find.byType(LiveScannerScreen), findsOneWidget);
       expect(find.text('Auto'), findsOneWidget);

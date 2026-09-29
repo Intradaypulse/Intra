@@ -85,7 +85,7 @@ void registerUnicodeOverlayCases() {
   );
 
   testWidgets(
-    'Hindi incremental overlay retains source bytes, forms, bookmarks and pixels',
+    'Hindi incremental overlay retains source bytes, forms, bookmarks and JPX pixels',
     (tester) async {
       final directory = await Directory(
         (await getTemporaryDirectory()).path,

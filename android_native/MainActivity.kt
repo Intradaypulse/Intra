@@ -26,9 +26,22 @@ import kotlin.math.*
 /** A single worker keeps PDF parsing/writing off Android's UI thread. */
 class MainActivity : FlutterActivity() {
     private val pdfWorker = Executors.newSingleThreadExecutor()
+    companion object {
+        private val activeScratch = mutableSetOf<String>()
+    }
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         PDFBoxResourceLoader.init(applicationContext)
+        // Recover private scratch left by process termination. A second engine
+        // must not delete a worker directory that is still in use in this process.
+        pdfWorker.execute {
+            synchronized(activeScratch) {
+                cacheDir.listFiles()?.filter {
+                    it.isDirectory && it.name.matches(Regex("pdfmate_overlay_[0-9]+")) &&
+                        !activeScratch.contains(it.path)
+                }?.forEach { it.deleteRecursively() }
+            }
+        }
         MethodChannel(engine.dartExecutor.binaryMessenger, "pdfmate/unicode_overlay")
             .setMethodCallHandler { call, result ->
                 if (call.method != "append") { result.notImplemented(); return@setMethodCallHandler }
@@ -60,8 +73,13 @@ class MainActivity : FlutterActivity() {
 
     private fun appendOverlay(source: File, output: File, manifest: File, password: String) {
         require(source.canonicalPath != output.canonicalPath) { "Output must be a new copy" }
+        require(!output.exists()) { "Output already exists" }
         val scratch = File(cacheDir, "pdfmate_overlay_${System.nanoTime()}")
-        check(scratch.mkdirs()) { "Cannot create PDF scratch directory" }
+        synchronized(activeScratch) {
+            check(scratch.mkdirs()) { "Cannot create PDF scratch directory" }
+            activeScratch.add(scratch.path)
+        }
+        val working = File(scratch, "result.pdf")
         try {
             val memory = MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)
             PDDocument.load(source, password, memory).use { doc ->
@@ -136,10 +154,10 @@ class MainActivity : FlutterActivity() {
                     changed.add(page.cosObject)
                     changed.add(page.resources.cosObject)
                 } }
-                FileOutputStream(output).use { doc.saveIncremental(it, changed) }
+                FileOutputStream(working).use { doc.saveIncremental(it, changed) }
             }
             // Validate extraction one page at a time without retaining the entire OCR corpus.
-            PDDocument.load(output, password, MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)).use { verified ->
+            PDDocument.load(working, password, MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)).use { verified ->
                 val stripper = PDFTextStripper()
                 manifest.useLines { lines -> lines.forEach { raw ->
                     val item = JSONObject(raw)
@@ -154,9 +172,16 @@ class MainActivity : FlutterActivity() {
                     }
                 } }
             }
+            check(!isDestroyed) { "OCR activity closed before completion" }
+            check(working.renameTo(output)) { "Cannot publish searchable PDF" }
         } catch (error: Exception) {
             output.delete()
             throw error
-        } finally { scratch.deleteRecursively() }
+        } finally {
+            synchronized(activeScratch) {
+                scratch.deleteRecursively()
+                activeScratch.remove(scratch.path)
+            }
+        }
     }
 }
