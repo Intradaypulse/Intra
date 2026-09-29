@@ -1337,11 +1337,31 @@ class PdfService {
           await secureDeleteTemporary(input);
         }
         final info = doc.pages[index];
+        final existing = await doc.extract(pages: PdfPages.single(index));
+        final existingMatches = <String, List<SearchResult>>{};
         final words = <Map<String, Object>>[];
         for (final word in _orderedOcrWords(recognized, tableRows: tableRows)) {
           if (word.text.trim().isEmpty) continue;
           final box = word.boundingBox;
           if (box.width <= 0 || box.height <= 0) continue;
+          if (existing.trim().isNotEmpty) {
+            final matches = existingMatches[word.text] ??= await doc.search(
+              query: word.text,
+              pages: PdfPages.single(index),
+            );
+            final cx = box.center.dx * info.effectiveWidth / image.width;
+            final cy =
+                info.effectiveHeight -
+                box.center.dy * info.effectiveHeight / image.height;
+            if (matches.any(
+              (m) =>
+                  cx >= m.rect.x &&
+                  cx <= m.rect.right &&
+                  cy >= m.rect.y &&
+                  cy <= m.rect.bottom,
+            ))
+              continue;
+          }
           words.add(
             ocrWordGeometry(
               text: word.text,

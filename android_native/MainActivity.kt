@@ -6,9 +6,11 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
@@ -84,6 +86,19 @@ class MainActivity : FlutterActivity() {
                     val rotation = ((page.rotation % 360) + 360) % 360
                     val words = item.getJSONArray("words")
                     if (words.length() == 0) return@forEach
+                    // Inherited resources and indirect /Font or /Contents objects
+                    // must not be silently mutated outside the incremental write set.
+                    val resources = COSDictionary(page.resources?.cosObject ?: COSDictionary())
+                    resources.getCOSDictionary(COSName.FONT)?.let {
+                        resources.setItem(COSName.FONT, COSDictionary(it))
+                    }
+                    page.resources = PDResources(resources)
+                    val oldContents = page.cosObject.getDictionaryObject(COSName.CONTENTS)
+                    if (oldContents is COSArray) {
+                        val contents = COSArray()
+                        contents.addAll(oldContents)
+                        page.cosObject.setItem(COSName.CONTENTS, contents)
+                    }
                     PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
                         // Map upright rendered coordinates back through page /Rotate and CropBox.
                         val view = when (rotation) {

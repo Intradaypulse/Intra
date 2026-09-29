@@ -31,7 +31,7 @@ void registerUnicodeOverlayCases() {
                 'page': page,
                 'words': [
                   {
-                    'text': 'नमस्ते',
+                    'text': 'नमस्ते₹—é',
                     'x': 50,
                     'y': 100,
                     'width': 75,
@@ -83,7 +83,7 @@ void registerUnicodeOverlayCases() {
         );
         for (var i = 0; i < 4; i++) {
           final text = await after.extract(pages: PdfPages.single(i));
-          expect(text.replaceAll(RegExp(r'\s+'), ''), contains('नमस्ते'));
+          expect(text.replaceAll(RegExp(r'\s+'), ''), contains('नमस्ते₹—é'));
           expect(text.replaceAll(RegExp(r'\s+'), ''), contains('हिन्दी'));
           final a = await before
               .render(

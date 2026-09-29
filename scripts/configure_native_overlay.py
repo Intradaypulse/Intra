@@ -21,3 +21,21 @@ properties = root / 'android/gradle.properties'
 p = properties.read_text()
 p = re.sub(r'^android.builtInKotlin=.*\n?', '', p, flags=re.M)
 properties.write_text(p + '\nandroid.builtInKotlin=true\n')
+
+# Audit actual configured plugins. Flutter 3.47's source-text detector also
+# warns about conditional legacy fallbacks that are never applied in this mode.
+with gradle.open('a') as out:
+    out.write('''
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+gradle.projectsEvaluated {
+    val legacy = rootProject.allprojects.filter {
+        it.plugins.hasPlugin("org.jetbrains.kotlin.android") || it.plugins.hasPlugin("kotlin-android")
+    }
+    check(legacy.isEmpty()) { "Legacy Kotlin Android plugin still applied: ${legacy.map { it.path }}" }
+    logger.lifecycle("PDFMate: verified built-in Kotlin; no legacy Kotlin Android plugin applied")
+}
+''')
