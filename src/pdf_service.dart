@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:document_scan/document_scan.dart';
 import 'package:file_picker/file_picker.dart';
@@ -15,6 +16,7 @@ import 'package:pdf_manipulator/io.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'pdf_rules.dart';
+import 'ocr_layout.dart';
 import 'scan_temp_session.dart';
 import 'serial_executor.dart';
 
@@ -1082,7 +1084,17 @@ class PdfService {
         final pageHeight = info.effectiveHeight;
         final pageTokens = <String>[];
 
-        for (final textBlock in recognized.blocks) {
+        final orderedBlocks = ocrReadingOrder([
+          for (final block in recognized.blocks)
+            OcrRegion(
+              block,
+              block.boundingBox.left,
+              block.boundingBox.top,
+              block.boundingBox.right,
+              block.boundingBox.bottom,
+            ),
+        ]);
+        for (final textBlock in orderedBlocks) {
           for (final line in textBlock.lines) {
             for (final element in line.elements) {
               final text = element.text.trim();
@@ -1173,13 +1185,15 @@ class PdfService {
       // The native editor preserves the original page objects, annotations,
       // forms, bookmarks and vector content. Confirm that the invisible OCR
       // text actually survives extraction for the selected script. If an OEM
-      // PDF engine cannot encode a script, the caller can fall back to the
-      // raster+embedded-font path instead of returning a broken searchable PDF.
+      // PDF engine cannot encode a script, verification rejects the output.
       if (verification.isNotEmpty) {
         final verifier = Pdf();
         PdfDoc? verifyDoc;
         try {
-          verifyDoc = await verifier.open(FileSource(output));
+          verifyDoc = await verifier.open(
+            FileSource(output),
+            password: password,
+          );
           for (final entry in verification.entries) {
             final extracted = await verifyDoc.extract(
               pages: PdfPages.single(entry.key),
@@ -1240,180 +1254,116 @@ class PdfService {
     );
   }
 
-  /// The native watermark font cannot encode Devanagari. Build a new PDF from
-  /// page images and a bundled Unicode font so extracted Hindi text is real.
-  /// This path changes the PDF's structure; the UI discloses that tradeoff.
+  /// Add an invisible embedded-font layer in an incremental revision. Only
+  /// OCR geometry is spooled; rendered page images are deleted immediately.
   Future<File> _makeDevanagariSearchablePdf(
     File source, {
     String? password,
     PdfOperationControl? control,
   }) async {
-    final bytes = await rootBundle.load(
-      'assets/fonts/NotoSansDevanagariOCR.ttf',
-    );
-    final font = pw.Font.ttf(bytes);
-    final original = Pdf();
+    if (!Platform.isAndroid) {
+      throw UnsupportedError(
+        'Preserving Hindi OCR currently requires Android.',
+      );
+    }
+    final engine = Pdf();
     PdfDoc? doc;
     final recognizer = TextRecognizer(script: TextRecognitionScript.devanagiri);
     final output = await _newFile('Searchable_Hindi');
-    final pages = <File>[];
-    final expected = <int, List<String>>{};
-    var temporaryBytes = 0;
+    final manifest = await _newManagedTempFile(
+      'ocr_geometry',
+      extension: 'jsonl',
+    );
+    IOSink? writer;
     try {
-      doc = await original.open(FileSource(source), password: password);
+      doc = await engine.open(FileSource(source), password: password);
+      writer = manifest.openWrite();
       for (var index = 0; index < doc.pageCount; index++) {
         control?.progress(index, doc.pageCount);
-        Uint8List? renderedBytes;
-        await for (final rendered in doc.render(
+        Uint8List? bytes;
+        await for (final page in doc.render(
           pages: PdfPages.single(index),
           size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500),
         )) {
-          renderedBytes = rendered.data;
+          bytes = page.data;
           break;
         }
-        if (renderedBytes == null) {
-          throw StateError('Could not render page ${index + 1} for OCR.');
-        }
-        final decoded = img.decodePng(renderedBytes);
-        if (decoded == null) {
-          throw StateError('Could not decode page ${index + 1} for OCR.');
-        }
-        final input = await _newManagedTempFile(
-          'hindi_input_$index',
-          extension: 'png',
-        );
+        if (bytes == null)
+          throw StateError('Could not render page ${index + 1}.');
+        final image = img.decodePng(bytes);
+        if (image == null)
+          throw StateError('Could not decode page ${index + 1}.');
+        final input = await _newManagedTempFile('ocr_input', extension: 'png');
         RecognizedText recognized;
         try {
-          await input.writeAsBytes(renderedBytes, flush: true);
+          await input.writeAsBytes(bytes, flush: true);
           recognized = await recognizer.processImage(
             InputImage.fromFilePath(input.path),
           );
         } finally {
           await secureDeleteTemporary(input);
         }
-
-        final page = doc.pages[index];
-        final width = page.effectiveWidth;
-        final height = page.effectiveHeight;
-        final overlays = <pw.Widget>[];
-        expected[index] = [];
-        for (final block in recognized.blocks) {
+        final info = doc.pages[index];
+        final blocks = ocrReadingOrder([
+          for (final block in recognized.blocks)
+            OcrRegion(
+              block,
+              block.boundingBox.left,
+              block.boundingBox.top,
+              block.boundingBox.right,
+              block.boundingBox.bottom,
+            ),
+        ]);
+        final words = <Map<String, Object>>[];
+        for (final block in blocks) {
           for (final line in block.lines) {
-            for (final element in line.elements) {
-              if (element.text.trim().isEmpty) continue;
-              final rect = mapOcrRectToPdf(
-                leftPx: element.boundingBox.left,
-                topPx: element.boundingBox.top,
-                widthPx: element.boundingBox.width,
-                heightPx: element.boundingBox.height,
-                imageWidthPx: decoded.width.toDouble(),
-                imageHeightPx: decoded.height.toDouble(),
-                pdfWidthPt: width,
-                pdfHeightPt: height,
-              );
-              if (rect.width <= 0 || rect.height <= 0) continue;
-              expected[index]!.add(element.text);
-              overlays.add(
-                pw.Positioned(
-                  left: rect.left,
-                  top: rect.top,
-                  child: pw.Opacity(
-                    opacity: 0.001,
-                    child: pw.Transform.rotate(
-                      angle: -(line.angle ?? 0) * math.pi / 180,
-                      child: pw.Text(
-                        element.text,
-                        style: pw.TextStyle(
-                          font: font,
-                          fontSize: math.max(2, rect.height * 0.8),
-                        ),
-                      ),
-                    ),
-                  ),
+            for (final word in line.elements) {
+              if (word.text.trim().isEmpty) continue;
+              final box = word.boundingBox;
+              if (box.width <= 0 || box.height <= 0) continue;
+              words.add(
+                ocrWordGeometry(
+                  text: word.text,
+                  corners: word.cornerPoints,
+                  left: box.left,
+                  top: box.top,
+                  width: box.width,
+                  height: box.height,
+                  scaleX: info.effectiveWidth / image.width,
+                  scaleY: info.effectiveHeight / image.height,
+                  angle: line.angle ?? 0,
                 ),
               );
             }
           }
         }
-
-        final single = pw.Document(compress: true);
-        single.addPage(
-          pw.Page(
-            pageFormat: pdf_format.PdfPageFormat(width, height),
-            margin: pw.EdgeInsets.zero,
-            build: (_) => pw.Stack(
-              children: [
-                pw.Positioned.fill(
-                  child: pw.Image(
-                    pw.MemoryImage(renderedBytes!),
-                    fit: pw.BoxFit.fill,
-                  ),
-                ),
-                ...overlays,
-              ],
-            ),
-          ),
-        );
-        final tempPage = await _newManagedTempFile('hindi_page_$index');
-        pages.add(tempPage);
-        final bytes = await single.save();
-        temporaryBytes += bytes.length;
-        if (temporaryBytes > 256 * 1024 * 1024) {
-          throw StateError(
-            'OCR temporary storage limit reached (256 MB). Split this PDF into smaller parts.',
-          );
-        }
-        await tempPage.writeAsBytes(bytes, flush: true);
+        writer.writeln(jsonEncode({'page': index, 'words': words}));
+        await writer.flush();
       }
-      if (pages.isEmpty) throw StateError('PDF has no pages.');
+      await writer.close();
+      writer = null;
+      await doc.dispose();
+      doc = null;
       control?.check();
-      final merger = Pdf();
-      try {
-        final sink = await FileSink.create(output);
-        try {
-          await merger.merge([
-            for (final page in pages) FileSource(page) as DataSource,
-          ], sink);
-          await sink.close();
-        } catch (_) {
-          await sink.close();
-          rethrow;
-        }
-      } finally {
-        await merger.dispose();
-      }
-      final verifier = Pdf();
-      PdfDoc? verified;
-      try {
-        verified = await verifier.open(FileSource(output));
-        for (final entry in expected.entries) {
-          final text = (await verified.extract(
-            pages: PdfPages.single(entry.key),
-          )).replaceAll(RegExp(r'\s+'), '');
-          if (!entry.value.every(
-            (word) => text.contains(word.replaceAll(RegExp(r'\s+'), '')),
-          )) {
-            throw StateError(
-              'Hindi text verification failed on page ${entry.key + 1}.',
-            );
-          }
-        }
-      } finally {
-        await verified?.dispose();
-        await verifier.dispose();
-      }
+      await const MethodChannel(
+        'pdfmate/unicode_overlay',
+      ).invokeMethod<void>('append', {
+        'source': source.path,
+        'output': output.path,
+        'manifest': manifest.path,
+        'password': password,
+      });
       control?.check();
       return output;
     } catch (_) {
       if (await output.exists()) await output.delete();
       rethrow;
     } finally {
-      for (final page in pages) {
-        await secureDeleteTemporary(page);
-      }
+      await writer?.close();
+      await secureDeleteTemporary(manifest);
       await recognizer.close();
       await doc?.dispose();
-      await original.dispose();
+      await engine.dispose();
     }
   }
 

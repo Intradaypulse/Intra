@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'unicode_overlay_cases.dart';
 
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -13,6 +14,8 @@ import 'package:pdfmate/pdf_service.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  registerUnicodeOverlayCases();
 
   testWidgets(
     'app boots, settings and camera lifecycle work',

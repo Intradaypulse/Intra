@@ -8,6 +8,8 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "android_native/**"
+      - "scripts/**"
       - "test/**"
       - "integration_test/**"
       - ".github/workflows/build-pdfmate-test-apk.yml"
@@ -47,6 +49,7 @@ jobs:
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
           cp -r src/assets buildapp/assets
+          python3 scripts/configure_native_overlay.py
           rm -f buildapp/test/widget_test.dart
           mkdir -p buildapp/test buildapp/integration_test
           if [ -d test ]; then cp -r test/. buildapp/test/; fi
@@ -249,6 +252,7 @@ jobs:
           cp src/pubspec.yaml buildapp/pubspec.yaml
           cp src/*.dart buildapp/lib/
           cp -r src/assets buildapp/assets
+          python3 scripts/configure_native_overlay.py
           rm -f buildapp/test/widget_test.dart
           mkdir -p buildapp/integration_test
           cp -r integration_test/. buildapp/integration_test/

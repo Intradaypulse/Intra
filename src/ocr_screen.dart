@@ -28,6 +28,7 @@ class _OcrScreenState extends State<OcrScreen> {
   int _pageCount = 0;
   bool _heavyUnlocked = false;
   bool _hasDigitalSignatures = false;
+  String? _password;
   String _status = 'Choose a PDF to OCR.';
   String? _extractedText;
 
@@ -82,7 +83,8 @@ class _OcrScreenState extends State<OcrScreen> {
         await widget.service.secureDeleteTemporary(picked);
         return;
       }
-      var file = picked;
+      final file = picked;
+      String? candidatePassword;
 
       setState(() {
         _busy = true;
@@ -93,12 +95,19 @@ class _OcrScreenState extends State<OcrScreen> {
       try {
         while (true) {
           try {
-            final count = await widget.service.pageCount(file);
+            final count = await widget.service.pageCount(
+              file,
+              password: candidatePassword,
+            );
             if (!mounted) return;
-            final signed = await widget.service.hasDigitalSignatures(file);
+            final signed = await widget.service.hasDigitalSignatures(
+              file,
+              password: candidatePassword,
+            );
             if (!mounted) return;
             setState(() {
               _source = file;
+              _password = candidatePassword;
               _pageCount = count;
               _heavyUnlocked =
                   count <= TelemetryService.instance.rewardedOcrThresholdPages;
@@ -110,17 +119,15 @@ class _OcrScreenState extends State<OcrScreen> {
             break;
           } on PdfPasswordRequired {
             if (!mounted) return;
-            final password = await _askPassword();
-            if (password == null) return;
-            try {
-              file = await widget.service.decryptToTemporary(file, password);
-            } on PdfWrongPassword {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Wrong password.')),
-                );
-              }
-            }
+            candidatePassword = await _askPassword();
+            if (candidatePassword == null) return;
+          } on PdfWrongPassword {
+            if (!mounted) return;
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Wrong password.')));
+            candidatePassword = await _askPassword();
+            if (candidatePassword == null) return;
           }
         }
       } catch (e) {
@@ -261,6 +268,7 @@ class _OcrScreenState extends State<OcrScreen> {
       final pages = await widget.service.ocrPdf(
         source,
         script: _script,
+        password: _password,
         control: _operation,
       );
       final combined = [
@@ -320,31 +328,6 @@ class _OcrScreenState extends State<OcrScreen> {
     if (source == null) return;
     if (!await _ensureLargeOcrUnlocked() || !mounted) return;
     if (!await _confirmSignedPdfModification() || !mounted) return;
-    if (_script == TextRecognitionScript.devanagiri) {
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Hindi searchable copy'),
-          content: const Text(
-            'Hindi OCR creates new image-based pages with an embedded '
-            'searchable text layer. Original links, forms, annotations, '
-            'bookmarks, vector content and signatures will not carry over. '
-            'The original PDF stays unchanged. Continue?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Create copy'),
-            ),
-          ],
-        ),
-      );
-      if (proceed != true || !mounted) return;
-    }
 
     setState(() {
       _busy = true;
@@ -363,6 +346,7 @@ class _OcrScreenState extends State<OcrScreen> {
       final output = await widget.service.makeSearchablePdf(
         source,
         script: _script,
+        password: _password,
         control: _operation,
       );
       if (!mounted) {
@@ -444,7 +428,7 @@ class _OcrScreenState extends State<OcrScreen> {
               Text(
                 _script == TextRecognitionScript.latin
                     ? 'Recognition runs on-device. Latin searchable PDFs preserve the original PDF and add a word-level OCR layer.'
-                    : 'Recognition runs on-device. Chinese, Japanese and Korean use a verified native text overlay. Hindi uses a bundled Unicode font in a new image-based copy.',
+                    : 'Recognition runs on-device. Chinese, Japanese and Korean use a verified native text overlay. Hindi embeds a Unicode text layer while preserving the original page objects. Arabic/Hebrew OCR is not supported by this recognizer.',
               ),
               if (_hasDigitalSignatures) ...[
                 const SizedBox(height: 8),
