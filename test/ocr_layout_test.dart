@@ -20,6 +20,21 @@ void main() {
       'L2',
     ]);
   });
+  test('table mode reads across rows; RTL reverses cells only', () {
+    final cells = [
+      const OcrRegion('A1', 0, 0, 40, 15),
+      const OcrRegion('B1', 100, 0, 140, 15),
+      const OcrRegion('A2', 0, 30, 40, 45),
+      const OcrRegion('B2', 100, 30, 140, 45),
+    ];
+    expect(ocrReadingOrder(cells, tableRows: true), ['A1', 'B1', 'A2', 'B2']);
+    expect(ocrReadingOrder(cells, tableRows: true, rtl: true), [
+      'B1',
+      'A1',
+      'B2',
+      'A2',
+    ]);
+  });
   test('horizontal rows and empty input have stable order', () {
     expect(ocrReadingOrder<String>([]), isEmpty);
     expect(

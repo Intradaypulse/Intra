@@ -29,6 +29,7 @@ class _OcrScreenState extends State<OcrScreen> {
   bool _heavyUnlocked = false;
   bool _hasDigitalSignatures = false;
   String? _password;
+  bool _tableRows = false;
   String _status = 'Choose a PDF to OCR.';
   String? _extractedText;
 
@@ -269,6 +270,7 @@ class _OcrScreenState extends State<OcrScreen> {
         source,
         script: _script,
         password: _password,
+        tableRows: _tableRows,
         control: _operation,
       );
       final combined = [
@@ -347,6 +349,7 @@ class _OcrScreenState extends State<OcrScreen> {
         source,
         script: _script,
         password: _password,
+        tableRows: _tableRows,
         control: _operation,
       );
       if (!mounted) {
@@ -422,6 +425,23 @@ class _OcrScreenState extends State<OcrScreen> {
                     ? null
                     : (value) {
                         if (value != null) setState(() => _script = value);
+                      },
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<bool>(
+                initialValue: _tableRows,
+                decoration: const InputDecoration(
+                  labelText: 'Reading order',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: false, child: Text('Text columns')),
+                  DropdownMenuItem(value: true, child: Text('Table rows')),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        if (value != null) setState(() => _tableRows = value);
                       },
               ),
               const SizedBox(height: 10),

@@ -1,0 +1,4 @@
+buildapp/
+device-qa-results/
+__pycache__/
+*.pyc

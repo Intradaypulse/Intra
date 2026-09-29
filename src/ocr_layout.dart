@@ -9,9 +9,13 @@ class OcrRegion<T> {
 
 /// Recursive whitespace cuts keep separated columns together and spanning
 /// headings ahead of columns. RTL changes column traversal, never characters.
-List<T> ocrReadingOrder<T>(List<OcrRegion<T>> regions, {bool rtl = false}) {
+List<T> ocrReadingOrder<T>(
+  List<OcrRegion<T>> regions, {
+  bool rtl = false,
+  bool tableRows = false,
+}) {
   if (regions.length < 2) return regions.map((r) => r.value).toList();
-  for (final vertical in [true, false]) {
+  for (final vertical in (tableRows ? [false, true] : [true, false])) {
     final sorted = [...regions]
       ..sort(
         (a, b) =>
@@ -29,8 +33,16 @@ List<T> ocrReadingOrder<T>(List<OcrRegion<T>> regions, {bool rtl = false}) {
       edge = math.max(edge, vertical ? sorted[i].right : sorted[i].bottom);
     }
     if (split > 0 && gap > .5) {
-      final first = ocrReadingOrder(sorted.sublist(0, split), rtl: rtl);
-      final second = ocrReadingOrder(sorted.sublist(split), rtl: rtl);
+      final first = ocrReadingOrder(
+        sorted.sublist(0, split),
+        rtl: rtl,
+        tableRows: tableRows,
+      );
+      final second = ocrReadingOrder(
+        sorted.sublist(split),
+        rtl: rtl,
+        tableRows: tableRows,
+      );
       return vertical && rtl ? [...second, ...first] : [...first, ...second];
     }
   }

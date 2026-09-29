@@ -9,7 +9,6 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart' as pdf_format;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
@@ -976,11 +975,46 @@ class PdfService {
     }
   }
 
+  List<TextElement> _orderedOcrWords(
+    RecognizedText text, {
+    required bool tableRows,
+  }) {
+    if (tableRows) {
+      return ocrReadingOrder([
+        for (final block in text.blocks)
+          for (final line in block.lines)
+            for (final word in line.elements)
+              OcrRegion(
+                word,
+                word.boundingBox.left,
+                word.boundingBox.top,
+                word.boundingBox.right,
+                word.boundingBox.bottom,
+              ),
+      ], tableRows: true);
+    }
+    final blocks = ocrReadingOrder([
+      for (final block in text.blocks)
+        OcrRegion(
+          block,
+          block.boundingBox.left,
+          block.boundingBox.top,
+          block.boundingBox.right,
+          block.boundingBox.bottom,
+        ),
+    ]);
+    return [
+      for (final block in blocks)
+        for (final line in block.lines) ...line.elements,
+    ];
+  }
+
   Future<List<String>> ocrPdf(
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
     PdfOperationControl? control,
+    bool tableRows = false,
   }) async {
     final pdf = Pdf();
     PdfDoc? doc;
@@ -1000,7 +1034,12 @@ class PdfService {
           final result = await recognizer.processImage(
             InputImage.fromFilePath(file.path),
           );
-          texts.add(result.text);
+          texts.add(
+            _orderedOcrWords(
+              result,
+              tableRows: tableRows,
+            ).map((w) => w.text).join(' '),
+          );
         } finally {
           await secureDeleteTemporary(file);
         }
@@ -1032,6 +1071,7 @@ class PdfService {
     required TextRecognitionScript script,
     String? password,
     PdfOperationControl? control,
+    bool tableRows = false,
   }) async {
     final engine = Pdf();
     PdfDoc? doc;
@@ -1084,80 +1124,69 @@ class PdfService {
         final pageHeight = info.effectiveHeight;
         final pageTokens = <String>[];
 
-        final orderedBlocks = ocrReadingOrder([
-          for (final block in recognized.blocks)
-            OcrRegion(
-              block,
-              block.boundingBox.left,
-              block.boundingBox.top,
-              block.boundingBox.right,
-              block.boundingBox.bottom,
-            ),
-        ]);
-        for (final textBlock in orderedBlocks) {
-          for (final line in textBlock.lines) {
-            for (final element in line.elements) {
-              final text = element.text.trim();
-              if (text.isEmpty) continue;
+        for (final element in _orderedOcrWords(
+          recognized,
+          tableRows: tableRows,
+        )) {
+          final text = element.text.trim();
+          if (text.isEmpty) continue;
 
-              final placement = mapOcrRectToPdf(
-                leftPx: element.boundingBox.left,
-                topPx: element.boundingBox.top,
-                widthPx: element.boundingBox.width,
-                heightPx: element.boundingBox.height,
-                imageWidthPx: decoded.width.toDouble(),
-                imageHeightPx: decoded.height.toDouble(),
-                pdfWidthPt: pageWidth,
-                pdfHeightPt: pageHeight,
-              );
-              if (placement.width <= 0 || placement.height <= 0) continue;
+          final placement = mapOcrRectToPdf(
+            leftPx: element.boundingBox.left,
+            topPx: element.boundingBox.top,
+            widthPx: element.boundingBox.width,
+            heightPx: element.boundingBox.height,
+            imageWidthPx: decoded.width.toDouble(),
+            imageHeightPx: decoded.height.toDouble(),
+            pdfWidthPt: pageWidth,
+            pdfHeightPt: pageHeight,
+          );
+          if (placement.width <= 0 || placement.height <= 0) continue;
 
-              final yFromBottom = math.max(
-                0.0,
-                pageHeight - placement.top - placement.height,
-              );
+          final yFromBottom = math.max(
+            0.0,
+            pageHeight - placement.top - placement.height,
+          );
 
-              if (existing.trim().isNotEmpty) {
-                final matches = existingMatches[text] ??= await doc.search(
-                  query: text,
-                  pages: PdfPages.single(index),
-                );
-                final cx = placement.left + placement.width / 2;
-                final cy = yFromBottom + placement.height / 2;
-                if (matches.any(
-                  (m) =>
-                      cx >= m.rect.x &&
-                      cx <= m.rect.x + m.rect.width &&
-                      cy >= m.rect.y &&
-                      cy <= m.rect.y + m.rect.height,
-                ))
-                  continue;
-              }
-
-              await editor.addWatermark(
-                index,
-                text,
-                style: PdfWatermarkStyle(
-                  fontSize: math.max(2, placement.height * 0.82),
-                  opacity: 0.001,
-                  rotation: line.angle ?? 0,
-                  color: PdfColor.black,
-                ),
-                position: PdfWatermarkPosition.exact(
-                  x: placement.left,
-                  y: yFromBottom,
-                  width: placement.width,
-                  height: placement.height,
-                ),
-                layer: PdfWatermarkLayer.background,
-              );
-
-              if (text.isNotEmpty) {
-                pageTokens.add(text);
-              }
-              changed = true;
-            }
+          if (existing.trim().isNotEmpty) {
+            final matches = existingMatches[text] ??= await doc.search(
+              query: text,
+              pages: PdfPages.single(index),
+            );
+            final cx = placement.left + placement.width / 2;
+            final cy = yFromBottom + placement.height / 2;
+            if (matches.any(
+              (m) =>
+                  cx >= m.rect.x &&
+                  cx <= m.rect.x + m.rect.width &&
+                  cy >= m.rect.y &&
+                  cy <= m.rect.y + m.rect.height,
+            ))
+              continue;
           }
+
+          await editor.addWatermark(
+            index,
+            text,
+            style: PdfWatermarkStyle(
+              fontSize: math.max(2, placement.height * 0.82),
+              opacity: 0.001,
+              rotation: element.angle ?? 0,
+              color: PdfColor.black,
+            ),
+            position: PdfWatermarkPosition.exact(
+              x: placement.left,
+              y: yFromBottom,
+              width: placement.width,
+              height: placement.height,
+            ),
+            layer: PdfWatermarkLayer.background,
+          );
+
+          if (text.isNotEmpty) {
+            pageTokens.add(text);
+          }
+          changed = true;
         }
 
         if (pageTokens.isNotEmpty) verification[index] = pageTokens;
@@ -1238,12 +1267,14 @@ class PdfService {
     TextRecognitionScript script = TextRecognitionScript.latin,
     String? password,
     PdfOperationControl? control,
+    bool tableRows = false,
   }) async {
     if (script == TextRecognitionScript.devanagiri) {
       return _makeDevanagariSearchablePdf(
         source,
         password: password,
         control: control,
+        tableRows: tableRows,
       );
     }
     return _makeSearchablePdfPreservingOriginal(
@@ -1251,6 +1282,7 @@ class PdfService {
       script: script,
       password: password,
       control: control,
+      tableRows: tableRows,
     );
   }
 
@@ -1260,6 +1292,7 @@ class PdfService {
     File source, {
     String? password,
     PdfOperationControl? control,
+    bool tableRows = false,
   }) async {
     if (!Platform.isAndroid) {
       throw UnsupportedError(
@@ -1304,38 +1337,24 @@ class PdfService {
           await secureDeleteTemporary(input);
         }
         final info = doc.pages[index];
-        final blocks = ocrReadingOrder([
-          for (final block in recognized.blocks)
-            OcrRegion(
-              block,
-              block.boundingBox.left,
-              block.boundingBox.top,
-              block.boundingBox.right,
-              block.boundingBox.bottom,
-            ),
-        ]);
         final words = <Map<String, Object>>[];
-        for (final block in blocks) {
-          for (final line in block.lines) {
-            for (final word in line.elements) {
-              if (word.text.trim().isEmpty) continue;
-              final box = word.boundingBox;
-              if (box.width <= 0 || box.height <= 0) continue;
-              words.add(
-                ocrWordGeometry(
-                  text: word.text,
-                  corners: word.cornerPoints,
-                  left: box.left,
-                  top: box.top,
-                  width: box.width,
-                  height: box.height,
-                  scaleX: info.effectiveWidth / image.width,
-                  scaleY: info.effectiveHeight / image.height,
-                  angle: line.angle ?? 0,
-                ),
-              );
-            }
-          }
+        for (final word in _orderedOcrWords(recognized, tableRows: tableRows)) {
+          if (word.text.trim().isEmpty) continue;
+          final box = word.boundingBox;
+          if (box.width <= 0 || box.height <= 0) continue;
+          words.add(
+            ocrWordGeometry(
+              text: word.text,
+              corners: word.cornerPoints,
+              left: box.left,
+              top: box.top,
+              width: box.width,
+              height: box.height,
+              scaleX: info.effectiveWidth / image.width,
+              scaleY: info.effectiveHeight / image.height,
+              angle: word.angle ?? 0,
+            ),
+          );
         }
         writer.writeln(jsonEncode({'page': index, 'words': words}));
         await writer.flush();

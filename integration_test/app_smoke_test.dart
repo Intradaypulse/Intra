@@ -56,6 +56,28 @@ void main() {
       expect(find.byType(LiveScannerScreen), findsOneWidget);
       expect(find.text('Auto'), findsOneWidget);
       await _waitFor(tester, find.byType(CameraPreview));
+      if (const bool.fromEnvironment('PDFMATE_PHYSICAL_QA')) {
+        await tester.tap(find.byTooltip('Torch'));
+        await tester.pump(const Duration(seconds: 1));
+        expect(
+          tester
+              .widget<CameraPreview>(find.byType(CameraPreview))
+              .controller
+              .value
+              .flashMode,
+          FlashMode.torch,
+        );
+        await tester.tap(find.byTooltip('Torch'));
+        await tester.pump(const Duration(seconds: 1));
+        expect(
+          tester
+              .widget<CameraPreview>(find.byType(CameraPreview))
+              .controller
+              .value
+              .flashMode,
+          FlashMode.off,
+        );
+      }
       debugPrint('SMOKE: camera pause/resume');
       binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);

@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
+import 'package:pdf_manipulator/io.dart';
 import 'overlay_fixture.dart';
 
 void registerUnicodeOverlayCases() {
@@ -104,6 +106,140 @@ void registerUnicodeOverlayCases() {
       } finally {
         await before?.dispose();
         await after?.dispose();
+        await engine.dispose();
+        await directory.delete(recursive: true);
+      }
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
+  testWidgets(
+    'encrypted Hindi overlay retains encryption and original revision',
+    (tester) async {
+      final directory = await Directory(
+        (await getTemporaryDirectory()).path,
+      ).createTemp('overlay_test_');
+      final original = base64Decode(encryptedOverlayFixtureBase64);
+      final source = await File(
+        '${directory.path}/source.pdf',
+      ).writeAsBytes(original);
+      final output = File('${directory.path}/output.pdf');
+      final manifest = await File('${directory.path}/geometry.jsonl')
+          .writeAsString(
+            jsonEncode({
+              'page': 0,
+              'words': [
+                {
+                  'text': 'नमस्ते',
+                  'x': 50,
+                  'y': 100,
+                  'width': 75,
+                  'height': 20,
+                  'angle': 0,
+                },
+              ],
+            }),
+          );
+      final engine = Pdf();
+      PdfDoc? document;
+      try {
+        await const MethodChannel(
+          'pdfmate/unicode_overlay',
+        ).invokeMethod<void>('append', {
+          'source': source.path,
+          'output': output.path,
+          'manifest': manifest.path,
+          'password': 'owner-secret',
+        });
+        expect(
+          (await output.readAsBytes()).sublist(0, original.length),
+          original,
+        );
+        document = await engine.open(
+          FileSource(output),
+          password: 'open-secret',
+        );
+        expect(document.isEncrypted, isTrue);
+        expect(
+          (await document.extract(
+            pages: PdfPages.single(0),
+          )).replaceAll(RegExp(r'\s+'), ''),
+          contains('नमस्ते'),
+        );
+      } finally {
+        await document?.dispose();
+        await engine.dispose();
+        await directory.delete(recursive: true);
+      }
+    },
+  );
+
+  testWidgets(
+    '300-page Unicode overlay shares font and cleans native scratch',
+    (tester) async {
+      final temp = await getTemporaryDirectory();
+      final directory = await Directory(temp.path).createTemp('overlay_test_');
+      final source = File('${directory.path}/source.pdf');
+      final output = File('${directory.path}/output.pdf');
+      final manifest = File('${directory.path}/geometry.jsonl');
+      final pdf = pw.Document();
+      for (var i = 0; i < 300; i++) {
+        pdf.addPage(pw.Page(build: (_) => pw.SizedBox()));
+      }
+      await source.writeAsBytes(await pdf.save());
+      final writer = manifest.openWrite();
+      for (var i = 0; i < 300; i++) {
+        writer.writeln(
+          jsonEncode({
+            'page': i,
+            'words': [
+              {
+                'text': 'हिन्दी',
+                'x': 50,
+                'y': 100,
+                'width': 75,
+                'height': 20,
+                'angle': 0,
+              },
+            ],
+          }),
+        );
+      }
+      await writer.close();
+      final engine = Pdf();
+      PdfDoc? document;
+      try {
+        await const MethodChannel('pdfmate/unicode_overlay').invokeMethod<void>(
+          'append',
+          {
+            'source': source.path,
+            'output': output.path,
+            'manifest': manifest.path,
+          },
+        );
+        document = await engine.open(FileSource(output));
+        expect(document.pageCount, 300);
+        expect(
+          (await document.extract(
+            pages: PdfPages.single(299),
+          )).replaceAll(RegExp(r'\s+'), ''),
+          contains('हिन्दी'),
+        );
+        expect(
+          await output.length(),
+          lessThan(await source.length() + 4 * 1024 * 1024),
+        );
+        expect(
+          await temp
+              .list()
+              .where(
+                (f) => f.path.split('/').last.startsWith('pdfmate_overlay_'),
+              )
+              .toList(),
+          isEmpty,
+        );
+      } finally {
+        await document?.dispose();
         await engine.dispose();
         await directory.delete(recursive: true);
       }

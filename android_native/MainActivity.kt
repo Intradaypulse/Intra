@@ -63,6 +63,9 @@ class MainActivity : FlutterActivity() {
         try {
             val memory = MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)
             PDDocument.load(source, password, memory).use { doc ->
+                require(doc.currentAccessPermission.canModify()) {
+                    "This PDF disallows content changes. Open it with the owner password."
+                }
                 // Certified documents can forbid content changes even in a new revision.
                 val permissions = doc.documentCatalog.cosObject.getCOSDictionary(COSName.PERMS)
                 require(permissions?.getDictionaryObject(COSName.DOCMDP) == null) {
