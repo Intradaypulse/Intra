@@ -108,6 +108,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             try {
               final decrypted =
                   await _service.decryptToTemporary(source, password);
+              if (!mounted) {
+                await _service.secureDeleteTemporary(decrypted);
+                return;
+              }
               _temporaryDecrypted = decrypted;
               source = decrypted;
               break;

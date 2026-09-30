@@ -83,73 +83,65 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
   }
 
   Future<void> _add() async {
-    final files = await widget.service.pickPdfFiles();
-    if (files.isEmpty) return;
-
-    setState(() {
-      _busy = true;
-      _status = 'Preparing PDFs…';
-    });
-
+    if (_busy) return;
+    setState(() { _busy = true; _status = 'Preparing PDFs…'; });
+    final pending = <File>[];
     try {
-      for (var file in files) {
+      final files = await widget.service.pickPdfFiles();
+      pending.addAll(files);
+      if (!mounted) return;
+      for (final picked in files) {
+        var file = picked;
         final name = file.uri.pathSegments.last;
         Uint8List? thumb;
-
-        while (true) {
+        var skipped = false;
+        while (mounted) {
           try {
             thumb = await widget.service.renderFirstThumbnail(file);
             break;
           } on PdfPasswordRequired {
             if (!mounted) return;
             final password = await _askPassword(name);
-            if (password == null) {
-              file = File('');
-              break;
-            }
+            if (!mounted) return;
+            if (password == null) { skipped = true; break; }
             try {
               file = await widget.service.decryptToTemporary(file, password);
-              thumb = await widget.service.renderFirstThumbnail(file);
-              break;
+              pending.add(file);
             } on PdfWrongPassword {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Wrong password.')),
-                );
-              }
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Wrong password.')),
+              );
             }
           }
         }
-
-        if (file.path.isEmpty) continue;
+        if (skipped) continue;
         if (!mounted) return;
         final size = await file.length();
-        setState(() {
-          _items.add(
-            _MergeItem(
-              file: file,
-              name: name,
-              size: size,
-              thumb: thumb,
-            ),
-          );
-        });
+        if (!mounted) return;
+        setState(() => _items.add(_MergeItem(
+          file: file, name: name, size: size, thumb: thumb,
+        )));
+        pending.remove(file);
       }
-
-      if (mounted) {
-        setState(() {
-          _status = '${_items.length} PDF(s). Drag to reorder before merging.';
-        });
-      }
+      if (mounted) setState(() => _status = '${_items.length} PDF(s). Drag to reorder before merging.');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not add PDF: $e')),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add PDF: $e')),
+      );
     } finally {
+      for (final file in pending) {
+        await widget.service.secureDeleteTemporary(file);
+      }
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _removeItem(int index) {
+    if (_busy) return;
+    final item = _items[index];
+    setState(() => _items.removeAt(index));
+    unawaited(widget.service.secureDeleteTemporary(item.file));
   }
 
   Future<void> _merge() async {
@@ -163,7 +155,10 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
       final output = await widget.service.mergeFiles(
         [for (final item in _items) item.file],
       );
-      if (!mounted) return;
+      if (!mounted) {
+        try { await output.delete(); } catch (_) {}
+        return;
+      }
       Navigator.of(context).pop<File>(output);
     } catch (e) {
       if (mounted) {
@@ -230,7 +225,9 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
                   : ReorderableListView.builder(
                       padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
                       itemCount: _items.length,
+                      buildDefaultDragHandles: !_busy,
                       onReorderItem: (oldIndex, newIndex) {
+                        if (_busy) return;
                         setState(() {
                           final item = _items.removeAt(oldIndex);
                           _items.insert(newIndex, item);
@@ -278,9 +275,7 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
                                   tooltip: 'Remove',
                                   onPressed: _busy
                                       ? null
-                                      : () => setState(
-                                            () => _items.removeAt(index),
-                                          ),
+                                      : () => _removeItem(index),
                                   icon: const Icon(
                                     Icons.delete_outline_rounded,
                                   ),

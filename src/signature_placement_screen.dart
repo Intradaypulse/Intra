@@ -134,6 +134,9 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
           ).showSnackBar(SnackBar(content: Text('Could not load PDF: $e')));
         }
       } finally {
+        if (picked.path != file.path) {
+          await widget.service.secureDeleteTemporary(picked);
+        }
         if (_source?.path != file.path || !mounted) {
           await widget.service.secureDeleteTemporary(file);
         }
