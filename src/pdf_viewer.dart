@@ -39,6 +39,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _showThumbs = false;
   bool _searchCancelled = false;
   int _searchProgress = 0;
+  final Map<int, String> _searchText = {};
+  int _searchTextCharacters = 0;
+  static const _searchCacheLimit = 2 * 1024 * 1024;
   String? _error;
 
   @override
@@ -244,7 +247,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       final needle = query.toLowerCase();
       for (var i = 0; i < doc.pageCount; i++) {
         if (_searchCancelled) break;
-        final text = await doc.extract(pages: PdfPages.single(i));
+        var text = _searchText[i];
+        if (text == null) {
+          text = await doc.extract(pages: PdfPages.single(i));
+          if (mounted && _searchTextCharacters + text.length <= _searchCacheLimit) {
+            _searchText[i] = text;
+            _searchTextCharacters += text.length;
+          }
+        }
         final index = text.toLowerCase().indexOf(needle);
         if (index >= 0) {
           final start = index > 48 ? index - 48 : 0;
@@ -334,6 +344,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   void dispose() {
     _searchCancelled = true;
+    _searchText.clear();
     _controller?.dispose();
     _thumbCache.clear();
     unawaited(_service.secureDeleteTemporary(_temporaryDecrypted));

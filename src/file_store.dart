@@ -93,12 +93,13 @@ class PdfFileStore {
                     replacement.path)
               raw,
         ];
-        await prefs.setStringList(_key, recovered);
+        await _persist(prefs, () => prefs.setStringList(_key, recovered));
       }
-      await prefs.remove(_renameKey);
+      await _persist(prefs, () => prefs.remove(_renameKey));
     } catch (_) {
-      // Preserve the journal if storage is unavailable so the next launch can
-      // retry recovery. A malformed journal should be inspected, not guessed.
+      // Do not filter missing old paths or overwrite a pending journal when
+      // recovery cannot persist the replacement record.
+      rethrow;
     }
   }
 
@@ -114,15 +115,15 @@ class PdfFileStore {
       path: destination.path,
       name: destination.uri.pathSegments.last,
     );
-    await prefs.setString(
+    await _persist(prefs, () => prefs.setString(
       _renameKey,
       jsonEncode({'old': record.path, 'record': replacement.toJson()}),
-    );
+    ));
     File renamed;
     try {
       renamed = await rename();
     } catch (_) {
-      await prefs.remove(_renameKey);
+      await _persist(prefs, () => prefs.remove(_renameKey));
       rethrow;
     }
     final actual = replacement.copyWith(
@@ -132,7 +133,7 @@ class PdfFileStore {
     records.removeWhere((e) => e.path == record.path || e.path == renamed.path);
     records.insert(0, actual);
     await _save(records);
-    await prefs.remove(_renameKey);
+    await _persist(prefs, () => prefs.remove(_renameKey));
     return actual;
   });
 
@@ -141,10 +142,21 @@ class PdfFileStore {
 
   Future<void> _save(List<PdfRecord> records) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
+    await _persist(prefs, () => prefs.setStringList(
       _key,
       records.map((e) => jsonEncode(e.toJson())).toList(),
-    );
+    ));
+  }
+
+  Future<void> _persist(SharedPreferences prefs, Future<bool> Function() write) async {
+    try {
+      if (!await write()) throw const FileSystemException('Could not save library changes');
+    } catch (_) {
+      // SharedPreferences updates its memory cache before the platform write.
+      // Reload persisted state so a failed write cannot appear committed.
+      await prefs.reload();
+      rethrow;
+    }
   }
 
   Future<void> add(PdfRecord record) => _mutations.run(() async {

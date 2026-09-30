@@ -367,8 +367,14 @@ class _HomeScreenState extends State<HomeScreen> {
       name: file.uri.pathSegments.last,
       createdAt: DateTime.now(),
     );
-    await _store.add(record);
+    try {
+      await _store.add(record);
+    } catch (_) {
+      try { await file.delete(); } catch (_) {}
+      rethrow;
+    }
 
+    if (!mounted) return;
     if (widget.autoSaveDownloads) {
       try {
         await _service.savePdfToDownloads(file);
@@ -452,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _completeAdvancedFile(String label, File? output) async {
     if (output == null) return;
-    setState(() => _busy = true);
+    if (mounted) setState(() => _busy = true);
     try {
       await _register(output);
       if (!mounted) return;
@@ -467,6 +473,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
       await AdsService.instance.recordCompletedOperation();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$label failed: $error')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
