@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'ads_service.dart';
+import 'privacy_policy_screen.dart';
 import 'telemetry_service.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -96,6 +97,17 @@ class SettingsScreen extends StatelessWidget {
           Card(
             child: Column(
               children: [
+                ListTile(
+                  key: const ValueKey('settings_privacy_policy'),
+                  leading: const Icon(Icons.policy_outlined),
+                  title: const Text('Privacy policy'),
+                  subtitle: const Text('Read how documents, ads and diagnostics are handled.'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+                  ),
+                ),
+                const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.privacy_tip_outlined),
                   title: const Text('Privacy choices'),

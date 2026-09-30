@@ -189,36 +189,64 @@ jobs:
           # Generated Flutter projects intentionally use the debug keystore for
           # local release builds. These artifacts verify release-mode/R8/AAB
           # architecture only and are never the Play Store signing identity.
-          flutter build apk --release
+          flutter build apk --release --split-per-abi
           flutter build appbundle --release
 
       - name: Verify release-candidate artifacts
         shell: bash
         run: |
-          test -f buildapp/build/app/outputs/flutter-apk/app-release.apk
           test -f buildapp/build/app/outputs/bundle/release/app-release.aab
-          cp buildapp/build/app/outputs/flutter-apk/app-release.apk PDFMate-RC-universal.apk
           cp buildapp/build/app/outputs/bundle/release/app-release.aab PDFMate-RC-test-signed.aab
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER"
-          "$APKSIGNER" verify --verbose PDFMate-RC-universal.apk
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk" "PDFMate-RC-$abi.apk"
+            "$APKSIGNER" verify --verbose "PDFMate-RC-$abi.apk"
+            sha256sum "PDFMate-RC-$abi.apk" > "PDFMate-RC-$abi.apk.sha256"
+          done
           jarsigner -verify PDFMate-RC-test-signed.aab
-          sha256sum PDFMate-RC-universal.apk | tee PDFMate-RC-universal.apk.sha256
           sha256sum PDFMate-RC-test-signed.aab | tee PDFMate-RC-test-signed.aab.sha256
-          ls -lh PDFMate-RC-universal.apk PDFMate-RC-test-signed.aab
+          ls -lh PDFMate-RC-*.apk PDFMate-RC-test-signed.aab
 
-      - name: Upload release-candidate artifacts
+      - name: Upload arm64-v8a APK only
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Release-Candidate
+          name: PDFMate-APK-arm64-v8a
           path: |
-            PDFMate-RC-universal.apk
-            PDFMate-RC-universal.apk.sha256
+            PDFMate-RC-arm64-v8a.apk
+            PDFMate-RC-arm64-v8a.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload armeabi-v7a APK only
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-APK-armeabi-v7a
+          path: |
+            PDFMate-RC-armeabi-v7a.apk
+            PDFMate-RC-armeabi-v7a.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload x86_64 APK only
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-APK-x86_64
+          path: |
+            PDFMate-RC-x86_64.apk
+            PDFMate-RC-x86_64.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test-signed AAB separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Test-Signed-AAB
+          path: |
             PDFMate-RC-test-signed.aab
             PDFMate-RC-test-signed.aab.sha256
           if-no-files-found: error
           retention-days: 14
-
 
   android-integration-smoke:
     runs-on: ubuntu-latest

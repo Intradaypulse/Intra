@@ -50,11 +50,13 @@ class PdfFileStore {
   static final _mutations = SerialExecutor();
 
   static const _key = 'pdfmate_recent_files_v1';
+  static const _renameKey = 'pdfmate_pending_rename_v1';
 
   Future<List<PdfRecord>> load() => _mutations.run(_load);
 
   Future<List<PdfRecord>> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    await _recoverRename(prefs);
     final raw = prefs.getStringList(_key) ?? const <String>[];
     final records = <PdfRecord>[];
     for (final item in raw) {
@@ -69,6 +71,70 @@ class PdfFileStore {
     if (records.length != raw.length) await _save(records);
     return records;
   }
+
+  Future<void> _recoverRename(SharedPreferences prefs) async {
+    final pending = prefs.getString(_renameKey);
+    if (pending == null) return;
+    try {
+      final entry = jsonDecode(pending) as Map<String, dynamic>;
+      final old = entry['old'] as String;
+      final replacement = PdfRecord.fromJson(
+        entry['record'] as Map<String, dynamic>,
+      );
+      final records = prefs.getStringList(_key) ?? <String>[];
+      final destinationExists = await File(replacement.path).exists();
+      final sourceExists = await File(old).exists();
+      if (destinationExists && !sourceExists) {
+        final recovered = <String>[
+          jsonEncode(replacement.toJson()),
+          for (final raw in records)
+            if ((jsonDecode(raw) as Map<String, dynamic>)['path'] != old &&
+                (jsonDecode(raw) as Map<String, dynamic>)['path'] !=
+                    replacement.path)
+              raw,
+        ];
+        await prefs.setStringList(_key, recovered);
+      }
+      await prefs.remove(_renameKey);
+    } catch (_) {
+      // Preserve the journal if storage is unavailable so the next launch can
+      // retry recovery. A malformed journal should be inspected, not guessed.
+    }
+  }
+
+  Future<PdfRecord> renameRecord(
+    PdfRecord record,
+    String destinationPath,
+    Future<File> Function() rename,
+  ) => _mutations.run(() async {
+    final records = await _load();
+    final prefs = await SharedPreferences.getInstance();
+    final destination = File(destinationPath);
+    final replacement = record.copyWith(
+      path: destination.path,
+      name: destination.uri.pathSegments.last,
+    );
+    await prefs.setString(
+      _renameKey,
+      jsonEncode({'old': record.path, 'record': replacement.toJson()}),
+    );
+    File renamed;
+    try {
+      renamed = await rename();
+    } catch (_) {
+      await prefs.remove(_renameKey);
+      rethrow;
+    }
+    final actual = replacement.copyWith(
+      path: renamed.path,
+      name: renamed.uri.pathSegments.last,
+    );
+    records.removeWhere((e) => e.path == record.path || e.path == renamed.path);
+    records.insert(0, actual);
+    await _save(records);
+    await prefs.remove(_renameKey);
+    return actual;
+  });
 
   Future<void> save(List<PdfRecord> records) =>
       _mutations.run(() => _save(records));
@@ -95,6 +161,19 @@ class PdfFileStore {
       0,
       existing == null ? record : record.copyWith(favorite: existing.favorite),
     );
+    await _save(items);
+  });
+
+  Future<void> addMany(List<PdfRecord> records) => _mutations.run(() async {
+    if (records.isEmpty) return;
+    final items = await _load();
+    final paths = records.map((e) => e.path).toSet();
+    final favorites = {for (final item in items) item.path: item.favorite};
+    items.removeWhere((e) => paths.contains(e.path));
+    items.insertAll(0, [
+      for (final record in records)
+        record.copyWith(favorite: favorites[record.path] ?? record.favorite),
+    ]);
     await _save(items);
   });
 

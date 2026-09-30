@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'ads_service.dart';
 import 'pdf_service.dart';
@@ -32,6 +33,7 @@ class _OcrScreenState extends State<OcrScreen> {
   bool _tableRows = false;
   String _status = 'Choose a PDF to OCR.';
   String? _extractedText;
+  File? _textFile;
 
   String _scriptLabel(TextRecognitionScript script) => switch (script) {
     TextRecognitionScript.latin => 'Latin',
@@ -265,24 +267,45 @@ class _OcrScreenState extends State<OcrScreen> {
           );
       },
     );
+    File? textFile;
+    IOSink? writer;
     try {
-      final pages = await widget.service.ocrPdf(
+      textFile = await widget.service.newTemporaryTextFile();
+      writer = textFile.openWrite();
+      final preview = StringBuffer();
+      var previewLength = 0;
+      var pageCount = 0;
+      await widget.service.ocrPdf(
         source,
         script: _script,
         password: _password,
         tableRows: _tableRows,
         control: _operation,
+        onPageText: (index, text) async {
+          writer!.writeln('--- Page ${index + 1} ---');
+          writer.writeln(text);
+          pageCount++;
+          if (previewLength < 50000) {
+            final available = 50000 - previewLength;
+            final excerpt = text.substring(
+              0, text.length < available ? text.length : available,
+            );
+            preview.writeln('--- Page ${index + 1} ---\n$excerpt\n');
+            previewLength += excerpt.length;
+          }
+        },
       );
-      final combined = [
-        for (var i = 0; i < pages.length; i++)
-          '--- Page ${i + 1} ---\n${pages[i]}',
-      ].join('\n\n');
+      await writer.close();
+      writer = null;
 
       if (!mounted) return;
+      await widget.service.secureDeleteTemporary(_textFile);
+      _textFile = textFile;
       setState(() {
-        _extractedText = combined;
-        _status = 'OCR complete for ${pages.length} page(s).';
+        _extractedText = preview.toString();
+        _status = 'OCR complete for $pageCount page(s). Preview shows up to 50,000 characters.';
       });
+      textFile = null;
     } on PdfOperationCancelled {
       if (mounted) setState(() => _status = 'Cancelled.');
     } catch (e) {
@@ -293,6 +316,8 @@ class _OcrScreenState extends State<OcrScreen> {
         ).showSnackBar(SnackBar(content: Text('OCR failed: $e')));
       }
     } finally {
+      try { await writer?.close(); } catch (_) {}
+      await widget.service.secureDeleteTemporary(textFile);
       _operation = null;
       if (mounted) setState(() => _busy = false);
     }
@@ -377,6 +402,7 @@ class _OcrScreenState extends State<OcrScreen> {
   void dispose() {
     _operation?.cancel();
     unawaited(widget.service.secureDeleteTemporary(_source));
+    unawaited(widget.service.secureDeleteTemporary(_textFile));
     super.dispose();
   }
 
@@ -512,8 +538,16 @@ class _OcrScreenState extends State<OcrScreen> {
                         }
                       },
                       icon: const Icon(Icons.copy_rounded),
-                      label: const Text('Copy all'),
+                      label: const Text('Copy preview'),
                     ),
+                    if (_textFile != null)
+                      IconButton(
+                        tooltip: 'Share full text file',
+                        icon: const Icon(Icons.share_outlined),
+                        onPressed: () => SharePlus.instance.share(
+                          ShareParams(files: [XFile(_textFile!.path)]),
+                        ),
+                      ),
                   ],
                 ),
                 Container(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -31,6 +32,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
   @override
   void dispose() {
+    unawaited(widget.service.secureDeleteTemporary(_source));
     _ownerController.dispose();
     _userController.dispose();
     _unlockController.dispose();
@@ -38,9 +40,23 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   Future<void> _pick() async {
-    final file = await widget.service.pickPdfFile();
-    if (file == null) return;
-    setState(() => _source = file);
+    if (_busy) return;
+    setState(() => _busy = true);
+    File? candidate;
+    try {
+      candidate = await widget.service.pickPdfFile();
+      if (candidate == null || !mounted) return;
+      final previous = _source;
+      setState(() => _source = candidate);
+      if (previous?.path != candidate.path) {
+        await widget.service.secureDeleteTemporary(previous);
+      }
+    } finally {
+      if (candidate != null && (_source?.path != candidate.path || !mounted)) {
+        await widget.service.secureDeleteTemporary(candidate);
+      }
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _runProtect() async {
@@ -117,6 +133,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
                   ? null
                   : (value) => setState(() {
                         _mode = value.first;
+                        unawaited(widget.service.secureDeleteTemporary(_source));
                         _source = null;
                       }),
             ),

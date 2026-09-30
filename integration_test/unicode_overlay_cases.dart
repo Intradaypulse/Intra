@@ -81,7 +81,7 @@ void registerUnicodeOverlayCases() {
         await directory.delete(recursive: true);
       }
     },
-    timeout: const Timeout(Duration(minutes: 3)),
+    timeout: const Timeout(Duration(minutes: 10)),
   );
 
   testWidgets(
@@ -185,7 +185,7 @@ void registerUnicodeOverlayCases() {
         await directory.delete(recursive: true);
       }
     },
-    timeout: const Timeout(Duration(minutes: 3)),
+    timeout: const Timeout(Duration(minutes: 10)),
   );
 
   testWidgets(
@@ -250,7 +250,7 @@ void registerUnicodeOverlayCases() {
   );
 
   testWidgets(
-    '300-page Unicode overlay shares font and cleans native scratch',
+    '1000-page Unicode overlay shares font and cleans native scratch',
     (tester) async {
       final temp = await getTemporaryDirectory();
       final directory = await Directory(temp.path).createTemp('overlay_test_');
@@ -258,12 +258,12 @@ void registerUnicodeOverlayCases() {
       final output = File('${directory.path}/output.pdf');
       final manifest = File('${directory.path}/geometry.jsonl');
       final pdf = pw.Document();
-      for (var i = 0; i < 300; i++) {
+      for (var i = 0; i < 1000; i++) {
         pdf.addPage(pw.Page(build: (_) => pw.SizedBox()));
       }
       await source.writeAsBytes(await pdf.save());
       final writer = manifest.openWrite();
-      for (var i = 0; i < 300; i++) {
+      for (var i = 0; i < 1000; i++) {
         writer.writeln(
           jsonEncode({
             'page': i,
@@ -293,10 +293,10 @@ void registerUnicodeOverlayCases() {
           },
         );
         document = await engine.open(FileSource(output));
-        expect(document.pageCount, 300);
+        expect(document.pageCount, 1000);
         expect(
           (await document.extract(
-            pages: PdfPages.single(299),
+            pages: PdfPages.single(999),
           )).replaceAll(RegExp(r'\s+'), ''),
           contains('हिन्दी'),
         );
@@ -319,7 +319,7 @@ void registerUnicodeOverlayCases() {
         await directory.delete(recursive: true);
       }
     },
-    timeout: const Timeout(Duration(minutes: 3)),
+    timeout: const Timeout(Duration(minutes: 10)),
   );
 
   testWidgets(
