@@ -491,8 +491,15 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(builder: (_) => AdvancedSplitScreen(service: _service)),
     );
     if (outputs == null || outputs.isEmpty) return;
+    if (!mounted) {
+      for (final output in outputs) {
+        try { await output.delete(); } catch (_) {}
+      }
+      return;
+    }
 
     setState(() => _busy = true);
+    var registered = false;
     try {
       await _store.addMany([
         for (final output in outputs)
@@ -502,6 +509,7 @@ class _HomeScreenState extends State<HomeScreen> {
             createdAt: DateTime.now(),
           ),
       ]);
+      registered = true;
       await _loadFiles();
       if (widget.autoSaveDownloads) {
         for (final output in outputs) {
@@ -518,6 +526,11 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       await AdsService.instance.recordCompletedOperation();
     } catch (error) {
+      if (!registered) {
+        for (final output in outputs) {
+          try { await output.delete(); } catch (_) {}
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Split registration failed: $error')),

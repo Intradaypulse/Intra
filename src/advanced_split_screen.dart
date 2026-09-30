@@ -228,7 +228,12 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
           );
       }
 
-      if (!mounted) return;
+      if (!mounted) {
+        for (final output in outputs) {
+          try { await output.delete(); } catch (_) {}
+        }
+        return;
+      }
       Navigator.of(context).pop<List<File>>(outputs);
     } on FormatException catch (e) {
       if (mounted) {
