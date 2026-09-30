@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +7,16 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/pdf_service.dart';
+
+class _PickedFile implements PlatformFile {
+  _PickedFile(this.path);
+  @override
+  final String path;
+  @override
+  Future<Uint8List> readAsBytes() => File(path).readAsBytes();
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 class _PickerService extends PdfService {
   _PickerService(Directory docs, Directory temp, this.files)
@@ -101,8 +110,8 @@ void main() {
   test('batch picker rolls back earlier copies when a later source is missing', () async {
     final valid = await createThreePagePdf();
     final picker = _PickerService(docs, temp, [
-      PlatformFile(name: 'valid.pdf', size: await valid.length(), path: valid.path),
-      PlatformFile(name: 'missing.pdf', size: 10, path: '${docs.path}/missing.pdf'),
+      _PickedFile(valid.path),
+      _PickedFile('${docs.path}/missing.pdf'),
     ]);
     await expectLater(picker.pickPdfFiles(), throwsA(anything));
     expect(await temp.list().toList(), isEmpty);
