@@ -228,7 +228,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       ),
     );
     input.dispose();
-    if (query == null || query.isEmpty) return;
+    if (!mounted || query == null || query.isEmpty) return;
 
     setState(() {
       _busy = true;
@@ -236,6 +236,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _searchProgress = 0;
     });
     final matches = <(int, String)>[];
+    var failed = false;
     final pdf = Pdf();
     PdfDoc? doc;
     try {
@@ -254,6 +255,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         if (mounted && i % 5 == 0) setState(() => _searchProgress = i + 1);
       }
     } catch (e) {
+      failed = true;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Search failed: $e')),
@@ -266,6 +268,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
 
     if (!mounted) return;
+    if (failed) return;
     if (_searchCancelled) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Search cancelled.')),
@@ -295,7 +298,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             return ListTile(
               leading: const Icon(Icons.find_in_page_outlined),
               title: Text('Page ${match.$1}'),
-              subtitle: Text(match.$2, maxLines: 2, overflow: TextOverflow.ellipsis),
+              subtitle: _highlightMatch(match.$2, query),
               onTap: () => Navigator.pop(context, match.$1),
             );
           },
@@ -304,6 +307,28 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
 
     if (page != null) _controller?.jumpToPage(page);
+  }
+
+  Widget _highlightMatch(String snippet, String query) {
+    final index = snippet.toLowerCase().indexOf(query.toLowerCase());
+    if (index < 0) {
+      return Text(snippet, maxLines: 2, overflow: TextOverflow.ellipsis);
+    }
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(text: snippet.substring(0, index)),
+        TextSpan(
+          text: snippet.substring(index, index + query.length),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+          ),
+        ),
+        TextSpan(text: snippet.substring(index + query.length)),
+      ]),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 
   @override
