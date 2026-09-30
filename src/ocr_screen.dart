@@ -283,7 +283,7 @@ class _OcrScreenState extends State<OcrScreen> {
         control: _operation,
         onPageText: (index, text) async {
           writer!.writeln('--- Page ${index + 1} ---');
-          writer!.writeln(text);
+          writer.writeln(text);
           pageCount++;
           if (previewLength < 50000) {
             final available = 50000 - previewLength;
