@@ -4,11 +4,17 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
+import shutil
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--serial', required=True, help='Authorized adb USB device ID')
 args = parser.parse_args()
+if shutil.which('adb') is None or shutil.which('flutter') is None:
+    raise SystemExit('Physical QA BLOCKED: install Android platform-tools and Flutter, then attach an authorized test phone.')
 adb = ['adb', '-s', args.serial]
+state = subprocess.run(adb + ['get-state'], capture_output=True, text=True)
+if state.returncode != 0 or state.stdout.strip() != 'device':
+    raise SystemExit('Physical QA BLOCKED: selected phone is missing, offline or unauthorized.')
 def prop(name):
     return subprocess.check_output(adb + ['shell', 'getprop', name], text=True).strip()
 if prop('ro.kernel.qemu') == '1' or prop('ro.boot.qemu') == '1':

@@ -5,6 +5,9 @@ root = Path('buildapp')
 target = root / 'android/app/src/main/kotlin/com/pdfmateapp/pdfmate/MainActivity.kt'
 target.parent.mkdir(parents=True, exist_ok=True)
 shutil.copyfile('android_native/MainActivity.kt', target)
+java_target = root / 'android/app/src/main/java/com/pdfmateapp/pdfmate/CancellableOutputStream.java'
+java_target.parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile('android_native/CancellableOutputStream.java', java_target)
 gradle = root / 'android/app/build.gradle.kts'
 s = gradle.read_text()
 s += '\ndependencies { implementation("com.tom-roush:pdfbox-android:2.0.27.0") }\n'

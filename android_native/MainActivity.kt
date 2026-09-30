@@ -16,6 +16,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
 import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
+import com.tom_roush.pdfbox.text.TextPosition
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.util.Matrix
 import org.json.JSONObject
@@ -177,12 +178,19 @@ class MainActivity : FlutterActivity() {
                     changed.add(page.cosObject)
                     changed.add(page.resources.cosObject)
                 } }
-                FileOutputStream(working).use { doc.saveIncremental(it, changed) }
+                CancellableOutputStream(FileOutputStream(working), cancelled).use {
+                    doc.saveIncremental(it, changed)
+                }
             }
             check(!cancelled.get()) { "OCR cancelled" }
             // Validate extraction one page at a time without retaining the entire OCR corpus.
             PDDocument.load(working, password, MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)).use { verified ->
-                val stripper = PDFTextStripper()
+                val stripper = object : PDFTextStripper() {
+                    override fun processTextPosition(text: TextPosition) {
+                        check(!cancelled.get()) { "OCR cancelled during verification" }
+                        super.processTextPosition(text)
+                    }
+                }
                 manifest.useLines { lines -> lines.forEach { raw ->
                     check(!cancelled.get()) { "OCR cancelled" }
                     val item = JSONObject(raw)
