@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -25,10 +26,15 @@ class PdfOperationCancelled implements Exception {
 }
 
 class PdfOperationControl {
-  PdfOperationControl({this.onProgress});
+  PdfOperationControl({this.onProgress, this.onCancel});
   final void Function(int completed, int total)? onProgress;
+  void Function()? onCancel;
   bool _cancelled = false;
-  void cancel() => _cancelled = true;
+  void cancel() {
+    if (_cancelled) return;
+    _cancelled = true;
+    onCancel?.call();
+  }
   void check() {
     if (_cancelled) throw PdfOperationCancelled();
   }
@@ -168,7 +174,7 @@ class PdfService {
   Future<File> renamePdf(File source, String requestedName) =>
       _renameQueue.run(() => _renamePdf(source, requestedName));
 
-  Future<File> _renamePdf(File source, String requestedName) async {
+  File renameDestination(File source, String requestedName) {
     final name = requestedName
         .trim()
         .replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
@@ -176,20 +182,17 @@ class PdfService {
     if (name.isEmpty || name == '.' || name == '..') {
       throw const FormatException('Enter a valid file name.');
     }
-    final destination = File('${source.parent.path}/$name.pdf');
+    return File('${source.parent.path}/$name.pdf');
+  }
+
+  Future<File> _renamePdf(File source, String requestedName) async {
+    final destination = renameDestination(source, requestedName);
     if (source.absolute.path == destination.absolute.path) return source;
     // App rename actions are serialized; refuse existing destinations.
     if (await destination.exists()) {
       throw const FileSystemException('A PDF with this name already exists.');
     }
-    try {
-      await source.copy(destination.path);
-      await source.delete();
-      return destination;
-    } catch (_) {
-      if (await destination.exists()) await destination.delete();
-      rethrow;
-    }
+    return source.rename(destination.path);
   }
 
   Future<File> importPdfFile(
@@ -305,14 +308,19 @@ class PdfService {
   );
 
   Future<File> _materialize(PlatformFile picked) async {
-    final path = picked.path;
-    if (path != null && await File(path).exists()) return File(path);
-    final tmp = await _tmp();
-    final file = File(
-      '${tmp.path}/${DateTime.now().microsecondsSinceEpoch}_${_safe(picked.name)}',
-    );
-    await file.writeAsBytes(await picked.readAsBytes(), flush: true);
-    return file;
+    final file = await _newManagedTempFile('picked');
+    try {
+      final path = picked.path;
+      if (path != null && await File(path).exists()) {
+        await File(path).openRead().pipe(file.openWrite());
+      } else {
+        await file.writeAsBytes(await picked.readAsBytes(), flush: true);
+      }
+      return file;
+    } catch (_) {
+      await secureDeleteTemporary(file);
+      rethrow;
+    }
   }
 
   Future<File?> compressPdf() async {
@@ -335,6 +343,7 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -342,8 +351,13 @@ class PdfService {
     final picked = await pickPdfs();
     if (picked.length < 2) return null;
     final inputs = <File>[];
-    for (final item in picked) {
-      inputs.add(await _materialize(item));
+    try {
+      for (final item in picked) {
+        inputs.add(await _materialize(item));
+      }
+    } catch (_) {
+      for (final input in inputs) { await secureDeleteTemporary(input); }
+      rethrow;
     }
 
     final outputFile = await _newFile('Merged');
@@ -361,6 +375,7 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      for (final input in inputs) { await secureDeleteTemporary(input); }
     }
   }
 
@@ -385,6 +400,7 @@ class PdfService {
       return outputs;
     } finally {
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -404,6 +420,7 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -431,6 +448,7 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -460,6 +478,7 @@ class PdfService {
     } finally {
       await doc?.dispose();
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -483,6 +502,7 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -506,6 +526,7 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -545,6 +566,7 @@ class PdfService {
     } finally {
       await doc?.dispose();
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -560,6 +582,44 @@ class PdfService {
     } finally {
       await doc?.dispose();
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
+    }
+  }
+
+  Future<(File, String)?> extractPdfTextToFile() async {
+    final source = await pickPdfFile();
+    if (source == null) return null;
+    final output = await newTemporaryTextFile();
+    final pdf = Pdf();
+    PdfDoc? doc;
+    IOSink? writer;
+    final preview = StringBuffer();
+    var previewLength = 0;
+    try {
+      doc = await pdf.open(FileSource(source));
+      writer = output.openWrite();
+      for (var i = 0; i < doc.pageCount; i++) {
+        final text = await doc.extract(pages: PdfPages.single(i));
+        writer.writeln('--- Page ${i + 1} ---');
+        writer.writeln(text);
+        if (previewLength < 50000) {
+          final remaining = 50000 - previewLength;
+          final excerpt = text.substring(0, text.length < remaining ? text.length : remaining);
+          preview.writeln('--- Page ${i + 1} ---\n$excerpt\n');
+          previewLength += excerpt.length;
+        }
+      }
+      await writer.close();
+      writer = null;
+      return (output, preview.toString());
+    } catch (_) {
+      await secureDeleteTemporary(output);
+      rethrow;
+    } finally {
+      try { await writer?.close(); } catch (_) {}
+      await doc?.dispose();
+      await pdf.dispose();
+      await secureDeleteTemporary(source);
     }
   }
 
@@ -586,6 +646,7 @@ class PdfService {
       rethrow;
     } finally {
       await pdf.dispose();
+      await secureDeleteTemporary(sourceFile);
     }
   }
 
@@ -774,10 +835,12 @@ class PdfService {
     String? password,
   }) async {
     final outputs = <File>[];
+    try {
     for (var i = 0; i < ranges.length; i++) {
       final pages = ranges[i];
       if (pages.isEmpty) continue;
       final output = await _newFile('Split_Range_${i + 1}');
+      outputs.add(output);
       final pdf = Pdf();
       final sink = await FileSink.create(output);
       try {
@@ -788,7 +851,6 @@ class PdfService {
           password: password,
         );
         await sink.close();
-        outputs.add(output);
       } catch (_) {
         await sink.close();
         rethrow;
@@ -797,6 +859,14 @@ class PdfService {
       }
     }
     return outputs;
+    } catch (_) {
+      for (final output in outputs) {
+        try {
+          if (await output.exists()) await output.delete();
+        } catch (_) {}
+      }
+      rethrow;
+    }
   }
 
   Future<File> unlockPdf(File source, String password) async {
@@ -1015,6 +1085,7 @@ class PdfService {
     String? password,
     PdfOperationControl? control,
     bool tableRows = false,
+    Future<void> Function(int index, String text)? onPageText,
   }) async {
     final pdf = Pdf();
     PdfDoc? doc;
@@ -1034,13 +1105,12 @@ class PdfService {
           final result = await recognizer.processImage(
             InputImage.fromFilePath(file.path),
           );
+          String pageText;
           if (tableRows) {
-            texts.add(
-              _orderedOcrWords(
+            pageText = _orderedOcrWords(
                 result,
                 tableRows: true,
-              ).map((w) => w.text).join(' '),
-            );
+              ).map((w) => w.text).join(' ');
           } else {
             final blocks = ocrReadingOrder([
               for (final block in result.blocks)
@@ -1052,11 +1122,14 @@ class PdfService {
                   block.boundingBox.bottom,
                 ),
             ]);
-            texts.add(
-              blocks
+            pageText = blocks
                   .map((b) => b.lines.map((l) => l.text).join('\n'))
-                  .join('\n\n'),
-            );
+                  .join('\n\n');
+          }
+          if (onPageText != null) {
+            await onPageText(index, pageText);
+          } else {
+            texts.add(pageText);
           }
         } finally {
           await secureDeleteTemporary(file);
@@ -1071,6 +1144,9 @@ class PdfService {
       await pdf.dispose();
     }
   }
+
+  Future<File> newTemporaryTextFile() =>
+      _newManagedTempFile('ocr_text', extension: 'txt');
 
   Future<bool> hasDigitalSignatures(File source, {String? password}) async {
     final pdf = Pdf();
@@ -1326,6 +1402,7 @@ class PdfService {
       extension: 'jsonl',
     );
     IOSink? writer;
+    final token = DateTime.now().microsecondsSinceEpoch.toString();
     try {
       doc = await engine.open(FileSource(source), password: password);
       writer = manifest.openWrite();
@@ -1402,6 +1479,11 @@ class PdfService {
       await doc.dispose();
       doc = null;
       control?.check();
+      control?.onCancel = () {
+        unawaited(const MethodChannel('pdfmate/unicode_overlay')
+            .invokeMethod<void>('cancel', {'token': token})
+            .catchError((Object _) {}));
+      };
       await const MethodChannel(
         'pdfmate/unicode_overlay',
       ).invokeMethod<void>('append', {
@@ -1409,6 +1491,7 @@ class PdfService {
         'output': output.path,
         'manifest': manifest.path,
         'password': password,
+        'token': token,
       });
       control?.check();
       return output;
@@ -1416,6 +1499,7 @@ class PdfService {
       if (await output.exists()) await output.delete();
       rethrow;
     } finally {
+      control?.onCancel = null;
       // A full disk can fail both flush and close; cleanup must still run.
       try {
         await writer?.close();
@@ -1557,6 +1641,9 @@ class PdfService {
     String? password,
     int maxWidth = 2200,
     int maxHeight = 3100,
+    int startPage = 0,
+    int? endPage,
+    PdfOperationControl? control,
   }) async {
     final pdf = Pdf();
     PdfDoc? doc;
@@ -1564,11 +1651,17 @@ class PdfService {
 
     try {
       doc = await pdf.open(FileSource(source), password: password);
-      var pageNo = 1;
-      await for (final page in doc.render(
-        pages: const PdfPages.all(),
-        size: PdfRenderSize(maxWidth: maxWidth, maxHeight: maxHeight),
-      )) {
+      final last = endPage ?? doc.pageCount;
+      if (startPage < 0 || last > doc.pageCount || startPage >= last) {
+        throw RangeError('Choose a valid page range.');
+      }
+      for (var index = startPage; index < last; index++) {
+        control?.progress(index - startPage, last - startPage);
+        final pageNo = index + 1;
+        await for (final page in doc.render(
+          pages: PdfPages.single(index),
+          size: PdfRenderSize(maxWidth: maxWidth, maxHeight: maxHeight),
+        )) {
         final decoded = img.decodePng(page.data);
         if (decoded == null) throw StateError('Could not decode page $pageNo.');
         final file = await _newManagedTempFile(
@@ -1580,8 +1673,9 @@ class PdfService {
           img.encodeJpg(decoded, quality: 90),
           flush: true,
         );
-        pageNo++;
+        }
       }
+      control?.check();
       return outputs;
     } catch (_) {
       for (final file in outputs) {

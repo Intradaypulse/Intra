@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -20,6 +21,17 @@ class _CompressionScreenState extends State<CompressionScreen> {
   CompressionResult? _result;
   String? _password;
   bool _busy = false;
+  bool _outputHandedOff = false;
+
+  @override
+  void dispose() {
+    unawaited(widget.service.secureDeleteTemporary(_source));
+    final result = _result;
+    if (!_outputHandedOff && result != null) {
+      unawaited(result.file.delete().then((_) {}, onError: (Object _) {}));
+    }
+    super.dispose();
+  }
 
   String _formatBytes(int bytes) {
     const kb = 1024;
@@ -63,12 +75,13 @@ class _CompressionScreenState extends State<CompressionScreen> {
   }
 
   Future<void> _pick() async {
-    final file = await widget.service.pickPdfFile();
-    if (file == null) return;
-
-    String? password;
+    if (_busy) return;
     setState(() => _busy = true);
+    File? file;
+    String? password;
     try {
+      file = await widget.service.pickPdfFile();
+      if (file == null || !mounted) return;
       while (true) {
         try {
           await widget.service.pageCount(file, password: password);
@@ -87,12 +100,29 @@ class _CompressionScreenState extends State<CompressionScreen> {
       }
 
       if (!mounted) return;
+      final previous = _source;
+      final previousResult = _result;
       setState(() {
         _source = file;
         _password = password;
         _result = null;
       });
+      if (previous?.path != file.path) {
+        await widget.service.secureDeleteTemporary(previous);
+      }
+      if (previousResult != null && !_outputHandedOff) {
+        try { await previousResult.file.delete(); } catch (_) {}
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open PDF: $error')),
+        );
+      }
     } finally {
+      if (file != null && (_source?.path != file.path || !mounted)) {
+        await widget.service.secureDeleteTemporary(file);
+      }
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -101,10 +131,14 @@ class _CompressionScreenState extends State<CompressionScreen> {
     final source = _source;
     if (source == null) return;
 
+    final oldResult = _result;
     setState(() {
       _busy = true;
       _result = null;
     });
+    if (oldResult != null) {
+      try { await oldResult.file.delete(); } catch (_) {}
+    }
 
     try {
       final result = await widget.service.compressAdvanced(
@@ -112,7 +146,10 @@ class _CompressionScreenState extends State<CompressionScreen> {
         _preset,
         password: _password,
       );
-      if (!mounted) return;
+      if (!mounted) {
+        await result.file.delete();
+        return;
+      }
       setState(() => _result = result);
     } catch (e) {
       if (mounted) {
@@ -252,8 +289,10 @@ class _CompressionScreenState extends State<CompressionScreen> {
                       ],
                       const SizedBox(height: 16),
                       FilledButton(
-                        onPressed: () =>
-                            Navigator.of(context).pop<File>(result.file),
+                        onPressed: () {
+                          _outputHandedOff = true;
+                          Navigator.of(context).pop<File>(result.file);
+                        },
                         child: const Text('Save to My PDFs'),
                       ),
                     ],

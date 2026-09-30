@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -28,6 +29,7 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
 
   @override
   void dispose() {
+    unawaited(widget.service.secureDeleteTemporary(_source));
     _everyController.dispose();
     _rangeController.dispose();
     super.dispose();
@@ -66,43 +68,46 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
   }
 
   Future<void> _pick() async {
-    final file = await widget.service.pickPdfFile();
-    if (file == null) return;
-
-    setState(() {
-      _busy = true;
-      _source = file;
-      _pageCount = 0;
-      _password = null;
-      _status = 'Reading PDF…';
-    });
-
+    if (_busy) return;
+    setState(() => _busy = true);
+    File? file;
     try {
+      file = await widget.service.pickPdfFile();
+      if (file == null) return;
+      if (!mounted) return;
+      setState(() => _status = 'Reading PDF…');
+      String? password;
       while (true) {
         try {
           final count = await widget.service.pageCount(
             file,
-            password: _password,
+            password: password,
           );
           if (!mounted) return;
+          final previous = _source;
           setState(() {
+            _source = file;
+            _password = password;
             _pageCount = count;
             _status = '$count pages ready to split.';
           });
+          if (previous?.path != file.path) {
+            await widget.service.secureDeleteTemporary(previous);
+          }
           break;
         } on PdfPasswordRequired {
           if (!mounted) return;
-          final password = await _askPassword();
-          if (password == null) return;
-          _password = password;
+          final entered = await _askPassword();
+          if (entered == null) return;
+          password = entered;
         } on PdfWrongPassword {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Wrong password.')),
           );
-          final password = await _askPassword();
-          if (password == null) return;
-          _password = password;
+          final entered = await _askPassword();
+          if (entered == null) return;
+          password = entered;
         }
       }
     } catch (e) {
@@ -113,6 +118,9 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
         );
       }
     } finally {
+      if (file != null && (_source?.path != file.path || !mounted)) {
+        await widget.service.secureDeleteTemporary(file);
+      }
       if (mounted) setState(() => _busy = false);
     }
   }

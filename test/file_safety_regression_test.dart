@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 
@@ -36,6 +37,35 @@ void main() {
     );
     expect(await source.readAsString(), 'source');
     expect(await existing.readAsString(), 'existing');
+  });
+
+  test('rename journal restores library entry after process death', () async {
+    final old = await File('${root.path}/old.pdf').writeAsString('contents');
+    final record = PdfRecord(path: old.path, name: 'old.pdf', createdAt: DateTime(2026));
+    final store = PdfFileStore();
+    await store.add(record);
+    final destination = File('${root.path}/new.pdf');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pdfmate_pending_rename_v1', jsonEncode({
+      'old': old.path,
+      'record': record.copyWith(path: destination.path, name: 'new.pdf').toJson(),
+    }));
+    await old.rename(destination.path);
+    final recovered = await PdfFileStore().load();
+    expect(recovered.map((e) => e.path), [destination.path]);
+    expect(await destination.readAsString(), 'contents');
+    expect(prefs.getString('pdfmate_pending_rename_v1'), isNull);
+  });
+
+  test('batch registration publishes all split files together', () async {
+    final records = <PdfRecord>[];
+    for (var i = 0; i < 3; i++) {
+      final file = await File('${root.path}/part$i.pdf').writeAsString('$i');
+      records.add(PdfRecord(path: file.path, name: 'part$i.pdf', createdAt: DateTime(2026)));
+    }
+    await PdfFileStore().addMany(records);
+    expect((await PdfFileStore().load()).map((e) => e.path).toSet(),
+      records.map((e) => e.path).toSet());
   });
 
   test(

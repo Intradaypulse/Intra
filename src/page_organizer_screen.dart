@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -36,6 +37,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
 
   @override
   void dispose() {
+    unawaited(widget.service.secureDeleteTemporary(_source));
     _thumbCache.clear();
     super.dispose();
   }
@@ -276,7 +278,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                   child: Row(
                     children: [
                       TextButton.icon(
-                        onPressed: _toggleAll,
+                        onPressed: _busy ? null : _toggleAll,
                         icon: const Icon(Icons.select_all_rounded),
                         label: Text(
                           selectedCount == _pages.length
@@ -286,7 +288,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                       ),
                       const SizedBox(width: 4),
                       FilledButton.tonalIcon(
-                        onPressed: selectedCount == 0
+                        onPressed: (_busy || selectedCount == 0)
                             ? null
                             : () => _rotateSelected(-90),
                         icon: const Icon(Icons.rotate_left_rounded),
@@ -294,7 +296,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                       ),
                       const SizedBox(width: 6),
                       FilledButton.tonalIcon(
-                        onPressed: selectedCount == 0
+                        onPressed: (_busy || selectedCount == 0)
                             ? null
                             : () => _rotateSelected(90),
                         icon: const Icon(Icons.rotate_right_rounded),
@@ -302,7 +304,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                       ),
                       const SizedBox(width: 6),
                       FilledButton.tonalIcon(
-                        onPressed: selectedCount == 0 ? null : _deleteSelected,
+                        onPressed: (_busy || selectedCount == 0) ? null : _deleteSelected,
                         icon: const Icon(Icons.delete_outline_rounded),
                         label: Text('Delete ($selectedCount)'),
                       ),
@@ -327,6 +329,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                         padding: const EdgeInsets.fromLTRB(12, 6, 12, 100),
                         itemCount: _pages.length,
                         onReorderItem: (oldIndex, newIndex) {
+                          if (_busy) return;
                           setState(() {
                             final item = _pages.removeAt(oldIndex);
                             _pages.insert(newIndex, item);
@@ -337,7 +340,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                           return Card(
                             key: ValueKey('page-${page.originalIndex}'),
                             child: ListTile(
-                              onTap: () => setState(
+                              onTap: _busy ? null : () => setState(
                                 () => page.selected = !page.selected,
                               ),
                               leading: SizedBox(
@@ -357,6 +360,15 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                                           builder: (context, snapshot) {
                                             final bytes = snapshot.data;
                                             if (bytes == null) {
+                                              if (snapshot.hasError ||
+                                                  snapshot.connectionState == ConnectionState.done) {
+                                                return IconButton(
+                                                  tooltip: 'Retry thumbnail',
+                                                  icon: const Icon(Icons.refresh),
+                                                  onPressed: () => setState(() =>
+                                                      _thumbCache.remove(page.originalIndex)),
+                                                );
+                                              }
                                               return const Center(
                                                 child: SizedBox(
                                                   width: 18,
@@ -408,7 +420,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
                                 children: [
                                   Checkbox(
                                     value: page.selected,
-                                    onChanged: (v) => setState(
+                                    onChanged: _busy ? null : (v) => setState(
                                       () => page.selected = v ?? false,
                                     ),
                                   ),

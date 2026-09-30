@@ -22,6 +22,8 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.*
 
 /** A single worker keeps PDF parsing/writing off Android's UI thread. */
@@ -29,6 +31,7 @@ class MainActivity : FlutterActivity() {
     private val pdfWorker = Executors.newSingleThreadExecutor()
     companion object {
         private val activeScratch = mutableSetOf<String>()
+        private val cancellations = ConcurrentHashMap<String, AtomicBoolean>()
     }
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
@@ -45,23 +48,33 @@ class MainActivity : FlutterActivity() {
         }
         MethodChannel(engine.dartExecutor.binaryMessenger, "pdfmate/unicode_overlay")
             .setMethodCallHandler { call, result ->
+                if (call.method == "cancel") {
+                    call.argument<String>("token")?.let { cancellations[it]?.set(true) }
+                    result.success(null)
+                    return@setMethodCallHandler
+                }
                 if (call.method != "append") { result.notImplemented(); return@setMethodCallHandler }
                 val source = call.argument<String>("source")
                 val output = call.argument<String>("output")
                 val manifest = call.argument<String>("manifest")
                 val password = call.argument<String>("password") ?: ""
+                val token = call.argument<String>("token") ?: java.util.UUID.randomUUID().toString()
                 if (source == null || output == null || manifest == null) {
                     result.error("ARGUMENT", "Missing document paths", null)
                     return@setMethodCallHandler
                 }
+                val cancelled = AtomicBoolean(false)
+                cancellations[token] = cancelled
                 pdfWorker.execute {
                     try {
-                        appendOverlay(File(source), File(output), File(manifest), password)
+                        appendOverlay(File(source), File(output), File(manifest), password, cancelled)
                         Handler(Looper.getMainLooper()).post { result.success(null) }
                     } catch (error: Exception) {
                         Handler(Looper.getMainLooper()).post {
                             result.error("OCR_OVERLAY", error.message ?: "Could not add OCR layer", null)
                         }
+                    } finally {
+                        cancellations.remove(token, cancelled)
                     }
                 }
             }
@@ -72,7 +85,8 @@ class MainActivity : FlutterActivity() {
         super.onDestroy()
     }
 
-    private fun appendOverlay(source: File, output: File, manifest: File, password: String) {
+    private fun appendOverlay(source: File, output: File, manifest: File, password: String,
+                              cancelled: AtomicBoolean) {
         require(source.canonicalPath != output.canonicalPath) { "Output must be a new copy" }
         require(!output.exists()) { "Output already exists" }
         val scratch = File(cacheDir, "pdfmate_overlay_${System.nanoTime()}")
@@ -103,6 +117,7 @@ class MainActivity : FlutterActivity() {
                 }
                 val changed = HashSet<COSDictionary>()
                 manifest.useLines { lines -> lines.forEach { raw ->
+                    check(!cancelled.get()) { "OCR cancelled" }
                     val item = JSONObject(raw)
                     val index = item.getInt("page")
                     require(index in 0 until doc.numberOfPages) { "Invalid OCR page index" }
@@ -136,6 +151,7 @@ class MainActivity : FlutterActivity() {
                         stream.transform(view)
                         val viewHeight = if (rotation == 90 || rotation == 270) crop.width else crop.height
                         for (i in 0 until words.length()) {
+                            if (i % 64 == 0) check(!cancelled.get()) { "OCR cancelled" }
                             val word = words.getJSONObject(i)
                             val text = word.getString("text")
                             val x = word.getDouble("x").toFloat()
@@ -163,10 +179,12 @@ class MainActivity : FlutterActivity() {
                 } }
                 FileOutputStream(working).use { doc.saveIncremental(it, changed) }
             }
+            check(!cancelled.get()) { "OCR cancelled" }
             // Validate extraction one page at a time without retaining the entire OCR corpus.
             PDDocument.load(working, password, MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)).use { verified ->
                 val stripper = PDFTextStripper()
                 manifest.useLines { lines -> lines.forEach { raw ->
+                    check(!cancelled.get()) { "OCR cancelled" }
                     val item = JSONObject(raw)
                     val page = item.getInt("page") + 1
                     stripper.startPage = page
@@ -179,7 +197,7 @@ class MainActivity : FlutterActivity() {
                     }
                 } }
             }
-            check(!isDestroyed) { "OCR activity closed before completion" }
+            check(!isDestroyed && !cancelled.get()) { "OCR cancelled before completion" }
             check(working.renameTo(output)) { "Cannot publish searchable PDF" }
         } catch (error: Exception) {
             output.delete()

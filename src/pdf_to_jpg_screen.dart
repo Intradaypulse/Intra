@@ -21,7 +21,38 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
   final List<File> _images = [];
   final Set<int> _selected = {};
   bool _busy = false;
+  PdfOperationControl? _operation;
   String _status = 'Choose a PDF to convert its pages to JPG.';
+
+  Future<(int, int)?> _chooseRange(int count) async {
+    final controller = TextEditingController(text: '1-$count');
+    final raw = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Pages to convert'),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(
+            labelText: 'Range, e.g. 1-10 (1-$count)',
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Convert')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (raw == null) return null;
+    final match = RegExp(r'^(\d+)-(\d+)$').firstMatch(raw.trim());
+    final first = int.tryParse(match?.group(1) ?? '');
+    final last = int.tryParse(match?.group(2) ?? '');
+    if (first == null || last == null || first < 1 || last < first || last > count) {
+      throw FormatException('Choose pages between 1 and $count.');
+    }
+    return (first - 1, last);
+  }
 
   Future<String?> _askPassword({bool wrong = false}) async {
     final controller = TextEditingController();
@@ -77,7 +108,15 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
       try {
         while (true) {
           try {
-            final outputs = await widget.service.pdfToJpgFromFile(file);
+            final count = await widget.service.pageCount(file);
+            if (!mounted) return;
+            final range = await _chooseRange(count);
+            if (range == null || !mounted) return;
+            _operation = PdfOperationControl(onProgress: (done, total) {
+              if (mounted) setState(() => _status = 'Converting ${done + 1} of $total pages…');
+            });
+            final outputs = await widget.service.pdfToJpgFromFile(file,
+              startPage: range.$1, endPage: range.$2, control: _operation);
             if (!mounted) {
               for (final output in outputs) {
                 await widget.service.secureDeleteTemporary(output);
@@ -114,6 +153,8 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
             }
           }
         }
+      } on PdfOperationCancelled {
+        if (mounted) setState(() => _status = 'Conversion cancelled.');
       } catch (e) {
         if (mounted) {
           setState(() => _status = 'Conversion failed.');
@@ -122,6 +163,10 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
           ).showSnackBar(SnackBar(content: Text('PDF to JPG failed: $e')));
         }
       } finally {
+        _operation = null;
+        if (picked.path != file.path) {
+          await widget.service.secureDeleteTemporary(picked);
+        }
         if (_source?.path != file.path || !mounted) {
           await widget.service.secureDeleteTemporary(file);
         }
@@ -244,8 +289,9 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
 
   @override
   void dispose() {
+    _operation?.cancel();
     for (final file in _images) {
-      file.delete().catchError((_) => file);
+      unawaited(widget.service.secureDeleteTemporary(file));
     }
     unawaited(widget.service.secureDeleteTemporary(_source));
     super.dispose();
@@ -291,7 +337,13 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
                   ],
                 ),
               ),
-              if (_busy) const LinearProgressIndicator(),
+              if (_busy) ...[
+                const LinearProgressIndicator(),
+                if (_operation != null) TextButton(
+                  onPressed: () => _operation?.cancel(),
+                  child: const Text('Cancel conversion'),
+                ),
+              ],
               Expanded(
                 child: _images.isEmpty
                     ? Center(
@@ -328,6 +380,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
                                   child: Image.file(
                                     _images[index],
                                     fit: BoxFit.cover,
+                                    cacheWidth: 360,
                                   ),
                                 ),
                                 Positioned(

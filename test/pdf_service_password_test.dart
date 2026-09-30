@@ -56,6 +56,16 @@ void main() {
     },
   );
 
+  test('custom split removes earlier parts after a later invalid range', () async {
+    final source = await createThreePagePdf();
+    final original = (await docs.list().toList()).map((e) => e.path).toSet();
+    await expectLater(
+      service.splitRanges(source, [[0], [999]]),
+      throwsA(anything),
+    );
+    expect((await docs.list().toList()).map((e) => e.path).toSet(), original);
+  });
+
   test('encrypted PDF compression accepts the correct user password', () async {
     final source = await createThreePagePdf();
     final encrypted = await service.protectPdfAdvanced(

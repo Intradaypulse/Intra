@@ -37,6 +37,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   int _pages = 0;
   bool _busy = true;
   bool _showThumbs = false;
+  bool _searchCancelled = false;
+  int _searchProgress = 0;
   String? _error;
 
   @override
@@ -228,16 +230,28 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     input.dispose();
     if (query == null || query.isEmpty) return;
 
-    setState(() => _busy = true);
-    final matches = <int>[];
+    setState(() {
+      _busy = true;
+      _searchCancelled = false;
+      _searchProgress = 0;
+    });
+    final matches = <(int, String)>[];
     final pdf = Pdf();
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(File(path)));
       final needle = query.toLowerCase();
       for (var i = 0; i < doc.pageCount; i++) {
+        if (_searchCancelled) break;
         final text = await doc.extract(pages: PdfPages.single(i));
-        if (text.toLowerCase().contains(needle)) matches.add(i + 1);
+        final index = text.toLowerCase().indexOf(needle);
+        if (index >= 0) {
+          final start = index > 48 ? index - 48 : 0;
+          final end = index + query.length + 48 < text.length
+              ? index + query.length + 48 : text.length;
+          matches.add((i + 1, text.substring(start, end).replaceAll(RegExp(r'\s+'), ' ')));
+        }
+        if (mounted && i % 5 == 0) setState(() => _searchProgress = i + 1);
       }
     } catch (e) {
       if (mounted) {
@@ -252,6 +266,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
 
     if (!mounted) return;
+    if (_searchCancelled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Search cancelled.')),
+      );
+      return;
+    }
     if (matches.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No text match found.')),
@@ -263,20 +283,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: ListView(
+        child: ListView.builder(
           shrinkWrap: true,
-          children: [
-            ListTile(
+          itemCount: matches.length + 1,
+          itemBuilder: (context, index) {
+            if (index == 0) return ListTile(
               title: Text('${matches.length} matching page(s)'),
               subtitle: Text('“$query”'),
-            ),
-            for (final page in matches)
-              ListTile(
-                leading: const Icon(Icons.find_in_page_outlined),
-                title: Text('Page $page'),
-                onTap: () => Navigator.pop(context, page),
-              ),
-          ],
+            );
+            final match = matches[index - 1];
+            return ListTile(
+              leading: const Icon(Icons.find_in_page_outlined),
+              title: Text('Page ${match.$1}'),
+              subtitle: Text(match.$2, maxLines: 2, overflow: TextOverflow.ellipsis),
+              onTap: () => Navigator.pop(context, match.$1),
+            );
+          },
         ),
       ),
     );
@@ -286,6 +308,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   @override
   void dispose() {
+    _searchCancelled = true;
     _controller?.dispose();
     _thumbCache.clear();
     unawaited(_service.secureDeleteTemporary(_temporaryDecrypted));
@@ -385,6 +408,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                                 builder: (context, snapshot) {
                                                   final bytes = snapshot.data;
                                                   if (bytes == null) {
+                                                    if (snapshot.hasError ||
+                                                        snapshot.connectionState == ConnectionState.done) {
+                                                      return IconButton(
+                                                        tooltip: 'Retry thumbnail',
+                                                        onPressed: () => setState(() => _thumbCache.remove(index)),
+                                                        icon: const Icon(Icons.refresh),
+                                                      );
+                                                    }
                                                     return const SizedBox(
                                                       height: 96,
                                                       child: Center(
@@ -457,6 +488,19 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             right: 0,
                             top: 0,
                             child: LinearProgressIndicator(),
+                          ),
+                        if (_busy && _searchProgress > 0)
+                          Positioned(
+                            left: 8, right: 8, top: 8,
+                            child: Material(
+                              child: ListTile(
+                                title: Text('Searching page $_searchProgress / $_pages'),
+                                trailing: TextButton(
+                                  onPressed: () => setState(() => _searchCancelled = true),
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                            ),
                           ),
                       ],
                     ),

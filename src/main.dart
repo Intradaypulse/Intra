@@ -494,14 +494,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _busy = true);
     try {
-      for (final output in outputs) {
-        await _register(output);
+      await _store.addMany([
+        for (final output in outputs)
+          PdfRecord(
+            path: output.path,
+            name: output.uri.pathSegments.last,
+            createdAt: DateTime.now(),
+          ),
+      ]);
+      await _loadFiles();
+      if (widget.autoSaveDownloads) {
+        for (final output in outputs) {
+          try {
+            await _service.savePdfToDownloads(output);
+          } catch (error) {
+            await _showDownloadsFailure(output, error);
+          }
+        }
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Created ${outputs.length} split PDF(s)')),
       );
       await AdsService.instance.recordCompletedOperation();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Split registration failed: $error')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -550,13 +571,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _extractPdfText() async {
     setState(() => _busy = true);
+    File? textFile;
     try {
-      final text = await _service.extractPdfText();
-      if (!mounted || text == null) return;
+      final result = await _service.extractPdfTextToFile();
+      if (result == null) return;
+      textFile = result.$1;
+      final text = result.$2;
+      if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Embedded PDF text'),
+          title: const Text('Embedded PDF text preview'),
           content: SizedBox(
             width: double.maxFinite,
             child: SingleChildScrollView(
@@ -568,6 +593,15 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           actions: [
+            TextButton.icon(
+              onPressed: () async {
+                await SharePlus.instance.share(
+                  ShareParams(files: [XFile(textFile!.path)]),
+                );
+              },
+              icon: const Icon(Icons.share_outlined),
+              label: const Text('Share full text'),
+            ),
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Close'),
@@ -582,6 +616,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ).showSnackBar(SnackBar(content: Text('Text extraction failed: $e')));
       }
     } finally {
+      await _service.secureDeleteTemporary(textFile);
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -655,13 +690,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (value == null) return;
 
     try {
-      final renamed = await _service.renamePdf(File(record.path), value);
-      await _store.replace(
-        record.path,
-        record.copyWith(
-          path: renamed.path,
-          name: renamed.uri.pathSegments.last,
-        ),
+      await _store.renameRecord(
+        record,
+        _service.renameDestination(File(record.path), value).path,
+        () => _service.renamePdf(File(record.path), value),
       );
       await _loadFiles();
     } catch (e) {
