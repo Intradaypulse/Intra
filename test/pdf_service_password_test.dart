@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,25 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/pdf_service.dart';
+
+final class _PickedFile extends PlatformFile {
+  _PickedFile(this.path);
+  @override
+  final String path;
+  @override
+  Future<Uint8List> readAsBytes() => File(path).readAsBytes();
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _PickerService extends PdfService {
+  _PickerService(Directory docs, Directory temp, this.files)
+      : super(documentsDirectoryProvider: () async => docs,
+              temporaryDirectoryProvider: () async => temp);
+  final List<PlatformFile> files;
+  @override
+  Future<List<PlatformFile>> pickPdfs() async => files;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -74,6 +94,28 @@ void main() {
     expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
     await expectLater(service.unlockPdf(invalid, 'wrong'), throwsA(anything));
     expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
+  });
+
+  test('failed merge and signature remove partial outputs', () async {
+    final valid = await createThreePagePdf();
+    final invalid = await File('${docs.path}/invalid.pdf').writeAsString('invalid');
+    final before = (await docs.list().toList()).map((e) => e.path).toSet();
+    await expectLater(service.mergeFiles([valid, invalid]), throwsA(anything));
+    expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
+    await expectLater(service.stampSignatureAt(invalid, Uint8List.fromList([1, 2]),
+      page: 0, rect: PdfRect(x: 0, y: 0, width: 10, height: 10)), throwsA(anything));
+    expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
+  });
+
+  test('batch picker rolls back earlier copies when a later source is missing', () async {
+    final valid = await createThreePagePdf();
+    final picker = _PickerService(docs, temp, [
+      _PickedFile(valid.path),
+      _PickedFile('${docs.path}/missing.pdf'),
+    ]);
+    await expectLater(picker.pickPdfFiles(), throwsA(anything));
+    expect(await temp.list().toList(), isEmpty);
+    expect(await valid.exists(), isTrue);
   });
 
   test('encrypted PDF compression accepts the correct user password', () async {

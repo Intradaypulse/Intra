@@ -284,6 +284,7 @@ class _OcrScreenState extends State<OcrScreen> {
         onPageText: (index, text) async {
           writer!.writeln('--- Page ${index + 1} ---');
           writer.writeln(text);
+          await writer.flush();
           pageCount++;
           if (previewLength < 50000) {
             final available = 50000 - previewLength;
@@ -300,6 +301,7 @@ class _OcrScreenState extends State<OcrScreen> {
 
       if (!mounted) return;
       await widget.service.secureDeleteTemporary(_textFile);
+      if (!mounted) return;
       _textFile = textFile;
       setState(() {
         _extractedText = preview.toString();

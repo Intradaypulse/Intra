@@ -602,6 +602,7 @@ class PdfService {
         final text = await doc.extract(pages: PdfPages.single(i));
         writer.writeln('--- Page ${i + 1} ---');
         writer.writeln(text);
+        await writer.flush();
         if (previewLength < 50000) {
           final remaining = 50000 - previewLength;
           final excerpt = text.substring(0, text.length < remaining ? text.length : remaining);
@@ -613,6 +614,8 @@ class PdfService {
       writer = null;
       return (output, preview.toString());
     } catch (_) {
+      try { await writer?.close(); } catch (_) {}
+      writer = null;
       await secureDeleteTemporary(output);
       rethrow;
     } finally {
@@ -659,10 +662,15 @@ class PdfService {
   Future<List<File>> pickPdfFiles() async {
     final picked = await pickPdfs();
     final files = <File>[];
-    for (final item in picked) {
-      files.add(await _materialize(item));
+    try {
+      for (final item in picked) {
+        files.add(await _materialize(item));
+      }
+      return files;
+    } catch (_) {
+      for (final file in files) { await secureDeleteTemporary(file); }
+      rethrow;
     }
-    return files;
   }
 
   Future<int> pageCount(File source, {String? password}) async {
@@ -746,26 +754,33 @@ class PdfService {
     }
   }
 
-  Future<File> mergeFiles(List<File> inputs) async {
-    if (inputs.length < 2) {
-      throw ArgumentError('Select at least two PDF files.');
-    }
-    final output = await _newFile('Merged');
+  Future<File> _writeNewPdf(String prefix,
+      Future<void> Function(Pdf pdf, FileSink sink) write) async {
+    final output = await _newFile(prefix);
     final pdf = Pdf();
-    final sink = await FileSink.create(output);
+    FileSink? sink;
     try {
-      await pdf.merge(
-        inputs.map<DataSource>((file) => FileSource(file)).toList(),
-        sink,
-      );
+      sink = await FileSink.create(output);
+      await write(pdf, sink);
       await sink.close();
+      sink = null;
       return output;
     } catch (_) {
-      await sink.close();
+      try { await sink?.close(); } catch (_) {}
+      try { await output.delete(); } catch (_) {}
       rethrow;
     } finally {
       await pdf.dispose();
     }
+  }
+
+  Future<File> mergeFiles(List<File> inputs) async {
+    if (inputs.length < 2) {
+      throw ArgumentError('Select at least two PDF files.');
+    }
+    return _writeNewPdf('Merged', (pdf, sink) => pdf.merge(
+      inputs.map<DataSource>((file) => FileSource(file)).toList(), sink,
+    ));
   }
 
   Future<File> organizePdf(
@@ -925,25 +940,10 @@ class PdfService {
     required int page,
     required PdfRect rect,
   }) async {
-    final output = await _newFile('Signed');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
-    try {
-      await pdf.addImageStamp(
-        FileSource(source),
-        sink,
-        page: page,
-        imageData: MemorySource(signaturePng),
-        rect: rect,
-      );
-      await sink.close();
-      return output;
-    } catch (_) {
-      await sink.close();
-      rethrow;
-    } finally {
-      await pdf.dispose();
-    }
+    return _writeNewPdf('Signed', (pdf, sink) => pdf.addImageStamp(
+      FileSource(source), sink, page: page,
+      imageData: MemorySource(signaturePng), rect: rect,
+    ));
   }
 
   Future<PdfDoc> openPdfDoc(Pdf pdf, File source, {String? password}) {
@@ -1174,10 +1174,12 @@ class PdfService {
     PdfEditor? editor;
     final recognizer = TextRecognizer(script: script);
     final output = await _newFile('Searchable');
-    final verification = <int, List<String>>{};
+    final verification = await _newManagedTempFile('ocr_verify', extension: 'jsonl');
+    IOSink? verificationWriter;
     var changed = false;
 
     try {
+      verificationWriter = verification.openWrite();
       doc = await engine.open(FileSource(source), password: password);
       editor = await engine.edit(FileSource(source), password: password);
 
@@ -1285,9 +1287,14 @@ class PdfService {
           changed = true;
         }
 
-        if (pageTokens.isNotEmpty) verification[index] = pageTokens;
+        if (pageTokens.isNotEmpty) {
+          verificationWriter.writeln(jsonEncode({'page': index, 'tokens': pageTokens}));
+          await verificationWriter.flush();
+        }
       }
 
+      await verificationWriter.close();
+      verificationWriter = null;
       if (!changed) {
         await source.copy(output.path);
         control?.check();
@@ -1311,7 +1318,7 @@ class PdfService {
       // forms, bookmarks and vector content. Confirm that the invisible OCR
       // text actually survives extraction for the selected script. If an OEM
       // PDF engine cannot encode a script, verification rejects the output.
-      if (verification.isNotEmpty) {
+      if (await verification.length() > 0) {
         final verifier = Pdf();
         PdfDoc? verifyDoc;
         try {
@@ -1319,19 +1326,24 @@ class PdfService {
             FileSource(output),
             password: password,
           );
-          for (final entry in verification.entries) {
+          await for (final line in verification.openRead().transform(utf8.decoder).transform(const LineSplitter())) {
+            control?.check();
+            final entry = jsonDecode(line) as Map<String, dynamic>;
+            final pageIndex = entry['page'] as int;
+            final tokens = (entry['tokens'] as List).cast<String>();
             final extracted = await verifyDoc.extract(
-              pages: PdfPages.single(entry.key),
+              pages: PdfPages.single(pageIndex),
             );
             final normalized = extracted.replaceAll(RegExp(r'\s+'), '');
-            final matched = entry.value.every(
+            control?.check();
+            final matched = tokens.every(
               (token) =>
                   normalized.contains(token.replaceAll(RegExp(r'\s+'), '')),
             );
             if (!matched) {
               throw StateError(
                 'Native searchable-PDF text verification failed on '
-                'page ${entry.key + 1}.',
+                'page ${pageIndex + 1}.',
               );
             }
           }
@@ -1351,6 +1363,8 @@ class PdfService {
       } catch (_) {}
       rethrow;
     } finally {
+      try { await verificationWriter?.close(); } catch (_) {}
+      await secureDeleteTemporary(verification);
       await recognizer.close();
       await editor?.dispose();
       await doc?.dispose();
@@ -1499,6 +1513,7 @@ class PdfService {
       return output;
     } catch (_) {
       if (await output.exists()) await output.delete();
+      control?.check();
       rethrow;
     } finally {
       control?.onCancel = null;
