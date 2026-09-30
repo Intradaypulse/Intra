@@ -8,7 +8,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/pdf_service.dart';
 
-class _PickedFile implements PlatformFile {
+final class _PickedFile extends PlatformFile {
   _PickedFile(this.path);
   @override
   final String path;
