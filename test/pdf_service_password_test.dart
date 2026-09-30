@@ -66,6 +66,16 @@ void main() {
     expect((await docs.list().toList()).map((e) => e.path).toSet(), original);
   });
 
+  test('failed protect and unlock remove partial outputs', () async {
+    final invalid = await File('${docs.path}/invalid.pdf').writeAsString('not a PDF');
+    final before = (await docs.list().toList()).map((e) => e.path).toSet();
+    await expectLater(service.protectPdfAdvanced(invalid, ownerPassword: 'secret'),
+      throwsA(anything));
+    expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
+    await expectLater(service.unlockPdf(invalid, 'wrong'), throwsA(anything));
+    expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
+  });
+
   test('encrypted PDF compression accepts the correct user password', () async {
     final source = await createThreePagePdf();
     final encrypted = await service.protectPdfAdvanced(

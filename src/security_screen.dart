@@ -73,7 +73,10 @@ class _SecurityScreenState extends State<SecurityScreen> {
         userPassword: user,
         readOnly: _readOnly,
       );
-      if (!mounted) return;
+      if (!mounted) {
+        try { await output.delete(); } catch (_) {}
+        return;
+      }
       Navigator.of(context).pop<File>(output);
     } catch (e) {
       if (mounted) {
@@ -94,7 +97,10 @@ class _SecurityScreenState extends State<SecurityScreen> {
     setState(() => _busy = true);
     try {
       final output = await widget.service.unlockPdf(source, password);
-      if (!mounted) return;
+      if (!mounted) {
+        try { await output.delete(); } catch (_) {}
+        return;
+      }
       Navigator.of(context).pop<File>(output);
     } catch (e) {
       if (mounted) {

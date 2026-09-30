@@ -878,7 +878,8 @@ class PdfService {
       await sink.close();
       return output;
     } catch (_) {
-      await sink.close();
+      try { await sink.close(); } catch (_) {}
+      try { await output.delete(); } catch (_) {}
       rethrow;
     } finally {
       await pdf.dispose();
@@ -910,7 +911,8 @@ class PdfService {
       await sink.close();
       return output;
     } catch (_) {
-      await sink.close();
+      try { await sink.close(); } catch (_) {}
+      try { await output.delete(); } catch (_) {}
       rethrow;
     } finally {
       await pdf.dispose();
