@@ -57,3 +57,11 @@ Process death: kill the test application during OCR, relaunch, and inspect priva
 cache for abandoned `pdfmate_overlay_*` and `pdfmate_secure_tmp_*` files. Confirm
 original document opens and no partial new document is listed. Interrupted jobs
 are not resumable; rerun the job. Record actual observations before marking pass.
+
+## Native-save cancellation gate
+While saving a large Hindi searchable copy, tap Cancel. Confirm the source remains
+unchanged, no output is listed, and native scratch is removed. The writer checks
+cancellation between 16 KiB writes, including PDFBox's incremental source copy;
+verification also checks during text-position processing. A pending OS write or
+PDF parser work between checkpoints can still take time; this is not a hard
+wall-clock cancellation deadline. Repeat and confirm a subsequent save succeeds.

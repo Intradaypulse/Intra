@@ -157,6 +157,12 @@ jobs:
         working-directory: buildapp
         run: flutter analyze --no-fatal-infos
 
+      - name: Test native save cancellation
+        run: |
+          mkdir -p /tmp/pdfmate-native-tests
+          javac -d /tmp/pdfmate-native-tests android_native/CancellableOutputStream.java test/native/CancellableOutputStreamTest.java
+          java -cp /tmp/pdfmate-native-tests CancellableOutputStreamTest
+
       - name: Run regression tests
         working-directory: buildapp
         run: flutter test
