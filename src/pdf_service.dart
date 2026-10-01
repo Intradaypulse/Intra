@@ -315,7 +315,7 @@ class PdfService {
       if (path != null && await File(path).exists()) {
         await File(path).openRead().pipe(file.openWrite());
       } else {
-        await picked.readAsByteStream().pipe(file.openWrite());
+        await picked.readAsByteStream().cast<List<int>>().pipe(file.openWrite());
       }
       return file;
     } catch (_) {
