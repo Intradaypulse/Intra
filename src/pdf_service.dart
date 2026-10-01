@@ -39,6 +39,13 @@ class PdfOperationControl {
     if (_cancelled) throw PdfOperationCancelled();
   }
 
+  /// Yield to UI events so even cached/synchronous word loops accept Cancel.
+  Future<void> checkpoint() async {
+    check();
+    await Future<void>.delayed(Duration.zero);
+    check();
+  }
+
   void progress(int completed, int total) {
     check();
     onProgress?.call(completed, total);
@@ -1232,6 +1239,7 @@ class PdfService {
           recognized,
           tableRows: tableRows,
         )) {
+          await control?.checkpoint();
           final text = element.text.trim();
           if (text.isEmpty) continue;
 
@@ -1257,6 +1265,7 @@ class PdfService {
               query: text,
               pages: PdfPages.single(index),
             );
+            control?.check();
             final cx = placement.left + placement.width / 2;
             final cy = yFromBottom + placement.height / 2;
             if (matches.any(
@@ -1269,6 +1278,7 @@ class PdfService {
               continue;
           }
 
+          control?.check();
           await editor.addWatermark(
             index,
             text,
@@ -1287,6 +1297,7 @@ class PdfService {
             layer: PdfWatermarkLayer.background,
           );
 
+          control?.check();
           if (text.isNotEmpty) {
             pageTokens.add(text);
           }
@@ -1458,6 +1469,7 @@ class PdfService {
         final existingMatches = <String, List<SearchResult>>{};
         final words = <Map<String, Object>>[];
         for (final word in _orderedOcrWords(recognized, tableRows: tableRows)) {
+          await control?.checkpoint();
           if (word.text.trim().isEmpty) continue;
           final box = word.boundingBox;
           if (box.width <= 0 || box.height <= 0) continue;
@@ -1466,6 +1478,7 @@ class PdfService {
               query: word.text,
               pages: PdfPages.single(index),
             );
+            control?.check();
             final cx = box.center.dx * info.effectiveWidth / image.width;
             final cy =
                 info.effectiveHeight -

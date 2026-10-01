@@ -58,7 +58,7 @@ class _SignatureScreenState extends State<SignatureScreen> {
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Sign inside the box. Your signature will be stamped on page 1.',
+                'Sign inside the box. Next, choose the page and position for your signature.',
               ),
             ),
             Expanded(

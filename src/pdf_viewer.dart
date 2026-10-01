@@ -38,6 +38,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _busy = true;
   bool _showThumbs = false;
   bool _searchCancelled = false;
+  bool _searching = false;
   int _searchProgress = 0;
   final Map<int, String> _searchText = {};
   int _searchTextCharacters = 0;
@@ -240,6 +241,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     setState(() {
       _busy = true;
       _searchCancelled = false;
+      _searching = true;
       _searchProgress = 0;
     });
     final matches = <(int, String)>[];
@@ -254,6 +256,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         var text = _searchText[i];
         if (text == null) {
           text = await doc.extract(pages: PdfPages.single(i));
+          if (_searchCancelled) break;
           if (mounted && _searchTextCharacters + text.length <= _searchCacheLimit) {
             _searchText[i] = text;
             _searchTextCharacters += text.length;
@@ -278,7 +281,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     } finally {
       await doc?.dispose();
       await pdf.dispose();
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() { _busy = false; _searching = false; });
     }
 
     if (!mounted) return;
@@ -529,14 +532,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             top: 0,
                             child: LinearProgressIndicator(),
                           ),
-                        if (_busy && _searchProgress > 0)
+                        if (_searching)
                           Positioned(
                             left: 8, right: 8, top: 8,
                             child: Material(
                               child: ListTile(
-                                title: Text('Searching page $_searchProgress / $_pages'),
+                                title: Text(_searchCancelled ? 'Cancelling search…' : _searchProgress == 0 ? 'Preparing search…' : 'Searching page $_searchProgress / $_pages'),
                                 trailing: TextButton(
-                                  onPressed: () => setState(() => _searchCancelled = true),
+                                  onPressed: _searchCancelled ? null : () => setState(() => _searchCancelled = true),
                                   child: const Text('Cancel'),
                                 ),
                               ),

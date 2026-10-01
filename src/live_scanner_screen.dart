@@ -357,6 +357,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   }
 
   void _finish() {
+    if (_capturing) return;
     if (_pages.isEmpty) {
       Navigator.of(context).pop<List<String>>();
       return;
@@ -438,7 +439,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
             ],
           ),
           TextButton(
-            onPressed: _pages.isEmpty ? null : _finish,
+            onPressed: (_pages.isEmpty || _capturing) ? null : _finish,
             child: const Text('Done'),
           ),
         ],
