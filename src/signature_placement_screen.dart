@@ -10,6 +10,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'pdf_service.dart';
 import 'lru_future_cache.dart';
 import 'signature_screen.dart';
+import 'signature_geometry.dart';
 
 class SignaturePlacementScreen extends StatefulWidget {
   const SignaturePlacementScreen({super.key, required this.service});
@@ -26,6 +27,8 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   Uint8List? _signature;
   Uint8List? _placedSignature;
   double _signatureAspect = 2.25;
+  Uint8List? _cachedSignature;
+  double? _cachedRotation;
   String? _previewError;
   final _thumbs = LruFutureCache<int, Uint8List?>(capacity: 24);
   List<PdfPageInfo> _pageInfos = [];
@@ -171,22 +174,20 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   }
 
   void _updateSignatureImage() {
+    if (identical(_cachedSignature, _signature) && _cachedRotation == _rotationDegrees) return;
     final decoded = _signature == null ? null : img.decodePng(_signature!);
     if (decoded == null) return;
     final rotated = img.copyRotate(decoded, angle: _rotationDegrees,
         interpolation: img.Interpolation.linear);
     _placedSignature = Uint8List.fromList(img.encodePng(rotated));
     _signatureAspect = rotated.width / rotated.height;
+    _cachedSignature = _signature;
+    _cachedRotation = _rotationDegrees;
   }
 
-  Rect _placement(double pageWidth, double pageHeight) {
-    final width = math.min(pageWidth * _widthFraction, pageHeight * _signatureAspect);
-    final height = width / _signatureAspect;
-    return Rect.fromLTWH(
-      (_x * pageWidth).clamp(0.0, math.max(0.0, pageWidth - width)).toDouble(),
-      (_y * pageHeight).clamp(0.0, math.max(0.0, pageHeight - height)).toDouble(),
-      width, height);
-  }
+  Rect _placement(double pageWidth, double pageHeight) => signaturePlacement(
+    pageWidth: pageWidth, pageHeight: pageHeight, x: _x, y: _y,
+    widthFraction: _widthFraction, imageAspect: _signatureAspect);
 
   void _clampPlacement() {
     if (_pageInfos.isEmpty) return;

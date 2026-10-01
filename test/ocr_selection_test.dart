@@ -5,6 +5,8 @@ import 'package:pdfmate/ocr_screen.dart';
 import 'package:pdfmate/pdf_service.dart';
 
 class SelectionService extends PdfService {
+  SelectionService({this.signed = false});
+  final bool signed;
   final deleted = <String>[];
   var picks = 0;
   @override
@@ -18,7 +20,7 @@ class SelectionService extends PdfService {
 
   @override
   Future<bool> hasDigitalSignatures(File source, {String? password}) async =>
-      false;
+      signed;
   @override
   Future<void> secureDeleteTemporary(File? file) async {
     if (file != null) deleted.add(file.path);
@@ -26,6 +28,24 @@ class SelectionService extends PdfService {
 }
 
 void main() {
+  testWidgets('OCR locks source controls during confirmation and unlocks on cancel', (tester) async {
+    await tester.pumpWidget(MaterialApp(home: OcrScreen(service: SelectionService(signed: true))));
+    await tester.tap(find.text('Choose'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Make searchable'));
+    await tester.tap(find.text('Make searchable'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Digitally signed PDF'), findsOneWidget);
+    // Controls underneath the dialog must already be locked.
+    final buttons = tester.widgetList<ButtonStyleButton>(find.byType(OutlinedButton, skipOffstage: false));
+    expect(buttons.every((button) => button.onPressed == null), isTrue);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Digitally signed PDF'), findsNothing);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Make searchable')).onPressed, isNotNull);
+  });
+
   testWidgets('invalid replacement leaves the previous OCR source usable', (
     tester,
   ) async {
