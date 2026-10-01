@@ -20,6 +20,22 @@ final class _PickedFile extends PlatformFile {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+final class _CloudFile extends PlatformFile {
+  @override
+  String? get path => null;
+  @override
+  String get name => 'cloud.pdf';
+  @override
+  Future<Uint8List> readAsBytes() => throw StateError('Whole-file reads forbidden');
+  @override
+  Stream<Uint8List> readAsByteStream() async* {
+    yield Uint8List.fromList([1, 2]);
+    yield Uint8List.fromList([3, 4]);
+  }
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _PickerService extends PdfService {
   _PickerService(Directory docs, Directory temp, this.files)
       : super(documentsDirectoryProvider: () async => docs,
@@ -63,6 +79,20 @@ void main() {
     await file.writeAsBytes(await doc.save(), flush: true);
     return file;
   }
+
+  test('pathless cloud picker streams without whole-file allocation', () async {
+    final picker = _PickerService(docs, temp, [_CloudFile()]);
+    final files = await picker.pickPdfFiles();
+    expect(await files.single.readAsBytes(), [1, 2, 3, 4]);
+    await picker.secureDeleteTemporary(files.single);
+  });
+
+  test('failed compression removes its incomplete output', () async {
+    final invalid = await File('${docs.path}/invalid.pdf').writeAsString('invalid');
+    final before = (await docs.list().toList()).map((e) => e.path).toSet();
+    await expectLater(service.compressAdvanced(invalid, CompressionPreset.balanced), throwsA(anything));
+    expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
+  });
 
   test('managed picker copies retain original display names', () async {
     final source = await createThreePagePdf();

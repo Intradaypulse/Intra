@@ -30,6 +30,7 @@ import kotlin.math.*
 /** A single worker keeps PDF parsing/writing off Android's UI thread. */
 class MainActivity : FlutterActivity() {
     private val pdfWorker = Executors.newSingleThreadExecutor()
+    private val ownedCancellations = ConcurrentHashMap<String, AtomicBoolean>()
     companion object {
         private val activeScratch = mutableSetOf<String>()
         private val cancellations = ConcurrentHashMap<String, AtomicBoolean>()
@@ -66,6 +67,7 @@ class MainActivity : FlutterActivity() {
                 }
                 val cancelled = AtomicBoolean(false)
                 cancellations[token] = cancelled
+                ownedCancellations[token] = cancelled
                 pdfWorker.execute {
                     try {
                         appendOverlay(File(source), File(output), File(manifest), password, cancelled)
@@ -76,18 +78,21 @@ class MainActivity : FlutterActivity() {
                         }
                     } finally {
                         cancellations.remove(token, cancelled)
+                        ownedCancellations.remove(token, cancelled)
                     }
                 }
             }
     }
 
     override fun onDestroy() {
+        ownedCancellations.values.forEach { it.set(true) }
         pdfWorker.shutdown()
         super.onDestroy()
     }
 
     private fun appendOverlay(source: File, output: File, manifest: File, password: String,
                               cancelled: AtomicBoolean) {
+        check(!cancelled.get()) { "OCR cancelled" }
         require(source.canonicalPath != output.canonicalPath) { "Output must be a new copy" }
         require(!output.exists()) { "Output already exists" }
         val scratch = File(cacheDir, "pdfmate_overlay_${System.nanoTime()}")

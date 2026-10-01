@@ -297,9 +297,16 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$bytes B';
   }
 
+  final Set<String> _recordOperations = {};
+
   Future<void> _toggleFavorite(PdfRecord record) async {
+    if (!_recordOperations.add(record.path)) return;
+    try {
     await _store.setFavorite(record.path, !record.favorite);
     await _loadFiles();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not update favorite: $e')));
+    } finally { _recordOperations.remove(record.path); }
   }
 
   Future<void> _showDownloadsFailure(
@@ -732,6 +739,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _delete(PdfRecord record) async {
+    if (!_recordOperations.add(record.path)) return;
+    try {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -754,6 +763,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (await file.exists()) await file.delete();
     await _store.remove(record.path);
     await _loadFiles();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete PDF: $e')));
+    } finally { _recordOperations.remove(record.path); }
   }
 
   List<PdfRecord> get _filtered {

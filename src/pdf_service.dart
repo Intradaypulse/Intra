@@ -275,21 +275,9 @@ class PdfService {
     final images = await imagePicker.pickMultiImage(imageQuality: 92);
     if (images.isEmpty) return null;
 
-    final output = await _newFile('Images');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
-    try {
-      await pdf.imagesToPdf([
-        for (final image in images) FileSource(File(image.path)) as DataSource,
-      ], sink);
-      await sink.close();
-      return output;
-    } catch (_) {
-      await sink.close();
-      rethrow;
-    } finally {
-      await pdf.dispose();
-    }
+    return _writeNewPdf('Images', (pdf, sink) => pdf.imagesToPdf([
+      for (final image in images) FileSource(File(image.path)) as DataSource,
+    ], sink));
   }
 
   Future<File> _imagesToPdfBytes(List<Uint8List> images, String prefix) async {
@@ -327,7 +315,7 @@ class PdfService {
       if (path != null && await File(path).exists()) {
         await File(path).openRead().pipe(file.openWrite());
       } else {
-        await file.writeAsBytes(await picked.readAsBytes(), flush: true);
+        await picked.readAsByteStream().pipe(file.openWrite());
       }
       return file;
     } catch (_) {
@@ -726,42 +714,25 @@ class PdfService {
     CompressionPreset preset, {
     String? password,
   }) async {
-    final output = await _newFile('Compressed');
     final originalBytes = await source.length();
-    File readable = source;
     File? decryptedTemp;
-
+    File? output;
     try {
       if (password != null && password.isNotEmpty) {
         decryptedTemp = await decryptToTemporary(source, password);
-        readable = decryptedTemp;
       }
-
-      final pdf = Pdf();
-      final sink = await FileSink.create(output);
-      try {
-        final policy = switch (preset) {
-          CompressionPreset.highQuality => PdfImagePolicy.print,
-          CompressionPreset.balanced => PdfImagePolicy.ebook,
-          CompressionPreset.smallest => PdfImagePolicy.screen,
-        };
-        await pdf.compress(FileSource(readable), sink, images: policy);
-        await sink.close();
-      } catch (_) {
-        await sink.close();
-        try {
-          await output.delete();
-        } catch (_) {}
-        rethrow;
-      } finally {
-        await pdf.dispose();
-      }
-
-      return CompressionResult(
-        file: output,
-        originalBytes: originalBytes,
-        outputBytes: await output.length(),
-      );
+      final policy = switch (preset) {
+        CompressionPreset.highQuality => PdfImagePolicy.print,
+        CompressionPreset.balanced => PdfImagePolicy.ebook,
+        CompressionPreset.smallest => PdfImagePolicy.screen,
+      };
+      output = await _writeNewPdf('Compressed', (pdf, sink) =>
+        pdf.compress(FileSource(decryptedTemp ?? source), sink, images: policy));
+      return CompressionResult(file: output, originalBytes: originalBytes,
+        outputBytes: await output.length());
+    } catch (_) {
+      try { await output?.delete(); } catch (_) {}
+      rethrow;
     } finally {
       await secureDeleteTemporary(decryptedTemp);
     }
@@ -897,55 +868,18 @@ class PdfService {
     }
   }
 
-  Future<File> unlockPdf(File source, String password) async {
-    final output = await _newFile('Unlocked');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
-    try {
-      await pdf.decrypt(FileSource(source), sink, password: password);
-      await sink.close();
-      return output;
-    } catch (_) {
-      try { await sink.close(); } catch (_) {}
-      try { await output.delete(); } catch (_) {}
-      rethrow;
-    } finally {
-      await pdf.dispose();
-    }
-  }
+  Future<File> unlockPdf(File source, String password) =>
+      _writeNewPdf('Unlocked', (pdf, sink) =>
+        pdf.decrypt(FileSource(source), sink, password: password));
 
-  Future<File> protectPdfAdvanced(
-    File source, {
-    required String ownerPassword,
-    String userPassword = '',
-    bool readOnly = false,
-  }) async {
-    final output = await _newFile('Protected');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
-    try {
-      await pdf.encrypt(
-        FileSource(source),
-        sink,
-        encryption: PdfEncryptionConfig(
-          ownerPassword: ownerPassword,
-          userPassword: userPassword,
-          algorithm: PdfEncryptionAlgorithm.aes256,
-          permissions: readOnly
-              ? const PdfPermissions.readOnly()
-              : const PdfPermissions.all(),
-        ),
-      );
-      await sink.close();
-      return output;
-    } catch (_) {
-      try { await sink.close(); } catch (_) {}
-      try { await output.delete(); } catch (_) {}
-      rethrow;
-    } finally {
-      await pdf.dispose();
-    }
-  }
+  Future<File> protectPdfAdvanced(File source, {
+    required String ownerPassword, String userPassword = '', bool readOnly = false,
+  }) => _writeNewPdf('Protected', (pdf, sink) => pdf.encrypt(
+    FileSource(source), sink,
+    encryption: PdfEncryptionConfig(ownerPassword: ownerPassword,
+      userPassword: userPassword, algorithm: PdfEncryptionAlgorithm.aes256,
+      permissions: readOnly ? const PdfPermissions.readOnly() : const PdfPermissions.all()),
+  ));
 
   Future<File> stampSignatureAt(
     File source,
@@ -1037,12 +971,14 @@ class PdfService {
     }
   }
 
+  static final _renderQueue = SerialExecutor();
+
   Future<Uint8List?> renderPage(
     File source,
     int pageIndex, {
     String? password,
     int width = 1200,
-  }) async {
+  }) => _renderQueue.run(() async {
     final pdf = Pdf();
     PdfDoc? doc;
     try {
@@ -1058,7 +994,7 @@ class PdfService {
       await doc?.dispose();
       await pdf.dispose();
     }
-  }
+  });
 
   List<TextElement> _orderedOcrWords(
     RecognizedText text, {

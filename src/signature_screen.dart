@@ -12,6 +12,7 @@ class SignatureScreen extends StatefulWidget {
 
 class _SignatureScreenState extends State<SignatureScreen> {
   late final SignatureController _controller;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -30,24 +31,30 @@ class _SignatureScreenState extends State<SignatureScreen> {
   }
 
   Future<void> _done() async {
-    if (_controller.isEmpty) return;
-    final Uint8List? bytes = await _controller.toPngBytes(
-      width: 900,
-      height: 400,
-    );
-    if (!mounted || bytes == null) return;
-    Navigator.of(context).pop(bytes);
+    if (_exporting || _controller.isEmpty) return;
+    setState(() => _exporting = true);
+    try {
+      final Uint8List? bytes = await _controller.toPngBytes(width: 900, height: 400);
+      if (!mounted) return;
+      if (bytes == null) throw StateError('Could not export signature.');
+      Navigator.of(context).pop(bytes);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Signature export failed: $e')));
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(canPop: !_exporting, child: Scaffold(
       appBar: AppBar(
         title: const Text('Draw signature'),
         actions: [
           IconButton(
             tooltip: 'Clear',
-            onPressed: _controller.clear,
+            onPressed: _exporting ? null : _controller.clear,
             icon: const Icon(Icons.delete_sweep_outlined),
           ),
         ],
@@ -85,7 +92,7 @@ class _SignatureScreenState extends State<SignatureScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _done,
+                  onPressed: _exporting ? null : _done,
                   icon: const Icon(Icons.check_rounded),
                   label: const Text('Use signature'),
                 ),
@@ -94,6 +101,6 @@ class _SignatureScreenState extends State<SignatureScreen> {
           ],
         ),
       ),
-    );
+    ));
   }
 }

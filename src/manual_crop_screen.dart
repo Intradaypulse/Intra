@@ -6,6 +6,7 @@ import 'package:document_scan/document_scan.dart';
 import 'package:flutter/material.dart';
 
 import 'draggable_corner_overlay.dart';
+import 'crop_geometry.dart';
 
 class ManualCropResult {
   const ManualCropResult({
@@ -85,16 +86,13 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
   Future<Size?> _decodeSize(String path) async {
     try {
       final bytes = await File(path).readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
+      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       try {
-        final frame = await codec.getNextFrame();
-        final image = frame.image;
-        final size = Size(image.width.toDouble(), image.height.toDouble());
-        image.dispose();
-        return size;
-      } finally {
-        codec.dispose();
-      }
+        final descriptor = await ui.ImageDescriptor.encoded(buffer);
+        try { return Size(descriptor.width.toDouble(), descriptor.height.toDouble()); }
+        finally { descriptor.dispose(); }
+      } finally { buffer.dispose(); }
+
     } catch (_) {
       return null;
     }
@@ -115,7 +113,12 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
 
   Future<void> _confirm() async {
     final corners = _corners;
-    if (corners == null) return;
+    if (_busy || corners == null) return;
+    if (!validCropCorners(corners)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Keep corners in order and select a non-empty document area.')));
+      return;
+    }
     setState(() => _busy = true);
     try {
       final scan = await _scanner.scan(
@@ -190,6 +193,7 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
                               Image.file(
                                 File(widget.imagePath),
                                 fit: BoxFit.fill,
+                                cacheWidth: 1600,
                               ),
                               DraggableCornerOverlay(
                                 corners: corners,

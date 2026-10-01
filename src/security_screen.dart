@@ -51,6 +51,9 @@ class _SecurityScreenState extends State<SecurityScreen> {
       if (previous?.path != candidate.path) {
         await widget.service.secureDeleteTemporary(previous);
       }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not choose PDF: $e')));
     } finally {
       if (candidate != null && (_source?.path != candidate.path || !mounted)) {
         await widget.service.secureDeleteTemporary(candidate);
@@ -63,7 +66,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
     final source = _source;
     final owner = _ownerController.text;
     final user = _userController.text;
-    if (source == null || owner.isEmpty) return;
+    if (_busy || source == null || owner.isEmpty) return;
 
     setState(() => _busy = true);
     try {
@@ -92,7 +95,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
   Future<void> _runUnlock() async {
     final source = _source;
     final password = _unlockController.text;
-    if (source == null || password.isEmpty) return;
+    if (_busy || source == null || password.isEmpty) return;
 
     setState(() => _busy = true);
     try {
@@ -115,7 +118,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(canPop: !_busy, child: Scaffold(
       appBar: AppBar(title: const Text('PDF security')),
       body: SafeArea(
         child: ListView(
@@ -237,6 +240,6 @@ class _SecurityScreenState extends State<SecurityScreen> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
