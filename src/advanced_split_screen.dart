@@ -266,7 +266,7 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
               child: ListTile(
                 leading: const Icon(Icons.picture_as_pdf_outlined),
                 title: Text(
-                  _source?.uri.pathSegments.last ?? 'No PDF selected',
+                  (_source == null ? null : widget.service.displayName(_source!)) ?? 'No PDF selected',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

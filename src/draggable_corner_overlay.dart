@@ -20,7 +20,7 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
   static const _fill = Color(0x224F7CFF);
   static const _handle = Color(0xFF4F7CFF);
   static const double _hitRadius = 48;
-  static const double _touchLift = 38;
+  Offset _dragOffset = Offset.zero;
 
   int? _activeHandle;
   Size _size = Size.zero;
@@ -46,13 +46,16 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
         nearestDistance = d;
       }
     }
+    if (nearest >= 0) {
+      _dragOffset = _toLocal(points[nearest]) - details.localPosition;
+    }
     setState(() => _activeHandle = nearest >= 0 ? nearest : null);
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
     final active = _activeHandle;
     if (active == null || _size.isEmpty) return;
-    final lifted = details.localPosition - const Offset(0, _touchLift);
+    final lifted = details.localPosition + _dragOffset;
     widget.onCornerMoved(active, (
       x: (lifted.dx / _size.width).clamp(0.0, 1.0),
       y: (lifted.dy / _size.height).clamp(0.0, 1.0),
@@ -71,6 +74,7 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
           onPanStart: _onPanStart,
           onPanUpdate: _onPanUpdate,
           onPanEnd: _onPanEnd,
+          onPanCancel: () => setState(() => _activeHandle = null),
           child: CustomPaint(
             painter: _CornerPainter(
               corners: widget.corners,

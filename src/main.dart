@@ -420,8 +420,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (pagePaths == null || pagePaths.isEmpty) return;
 
-    setState(() => _busy = true);
     try {
+      if (!mounted) return;
+      setState(() => _busy = true);
       final output = await _service.createScannedPdfFromFiles(pagePaths);
       await _register(output);
       if (!mounted) return;

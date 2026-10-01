@@ -148,7 +148,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
               child: ListTile(
                 leading: const Icon(Icons.picture_as_pdf_rounded),
                 title: Text(
-                  _source?.uri.pathSegments.last ?? 'Choose a PDF',
+                  (_source == null ? null : widget.service.displayName(_source!)) ?? 'Choose a PDF',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

@@ -57,6 +57,31 @@ void main() {
     expect(prefs.getString('pdfmate_pending_rename_v1'), isNull);
   });
 
+  test('malformed rename journal does not block valid library records', () async {
+    final file = await File('${root.path}/valid.pdf').writeAsString('PDF');
+    final record = PdfRecord(path: file.path, name: 'valid.pdf', createdAt: DateTime(2026));
+    await PdfFileStore().add(record);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pdfmate_pending_rename_v1', '{broken');
+    expect((await PdfFileStore().load()).single.path, file.path);
+    expect(prefs.getString('pdfmate_pending_rename_v1'), isNull);
+    expect(prefs.getString('pdfmate_pending_rename_v1_corrupt'), '{broken');
+    await PdfFileStore().remove(file.path);
+    expect(await PdfFileStore().load(), isEmpty);
+  });
+
+  test('valid rename recovers despite an unrelated corrupt library row', () async {
+    final file = await File('${root.path}/renamed.pdf').writeAsString('PDF');
+    final record = PdfRecord(path: file.path, name: 'renamed.pdf', createdAt: DateTime(2026));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('pdfmate_recent_files_v1', ['not JSON']);
+    await prefs.setString('pdfmate_pending_rename_v1', jsonEncode({
+      'old': '${root.path}/old.pdf', 'record': record.toJson(),
+    }));
+    expect((await PdfFileStore().load()).single.path, file.path);
+    expect(prefs.getString('pdfmate_pending_rename_v1'), isNull);
+  });
+
   test('batch registration publishes all split files together', () async {
     final records = <PdfRecord>[];
     for (var i = 0; i < 3; i++) {

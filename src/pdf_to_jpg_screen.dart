@@ -324,7 +324,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        _source?.uri.pathSegments.last ?? _status,
+                        (_source == null ? null : widget.service.displayName(_source!)) ?? _status,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),

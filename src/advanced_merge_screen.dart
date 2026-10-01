@@ -92,7 +92,7 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
       if (!mounted) return;
       for (final picked in files) {
         var file = picked;
-        final name = file.uri.pathSegments.last;
+        final name = widget.service.displayName(file);
         Uint8List? thumb;
         var skipped = false;
         while (mounted) {

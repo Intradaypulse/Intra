@@ -75,32 +75,35 @@ class PdfFileStore {
   Future<void> _recoverRename(SharedPreferences prefs) async {
     final pending = prefs.getString(_renameKey);
     if (pending == null) return;
+    late String old;
+    late PdfRecord replacement;
     try {
       final entry = jsonDecode(pending) as Map<String, dynamic>;
-      final old = entry['old'] as String;
-      final replacement = PdfRecord.fromJson(
-        entry['record'] as Map<String, dynamic>,
-      );
-      final records = prefs.getStringList(_key) ?? <String>[];
-      final destinationExists = await File(replacement.path).exists();
-      final sourceExists = await File(old).exists();
-      if (destinationExists && !sourceExists) {
-        final recovered = <String>[
-          jsonEncode(replacement.toJson()),
-          for (final raw in records)
-            if ((jsonDecode(raw) as Map<String, dynamic>)['path'] != old &&
-                (jsonDecode(raw) as Map<String, dynamic>)['path'] !=
-                    replacement.path)
-              raw,
-        ];
-        await _persist(prefs, () => prefs.setStringList(_key, recovered));
-      }
-      await _persist(prefs, () => prefs.remove(_renameKey));
+      old = entry['old'] as String;
+      replacement = PdfRecord.fromJson(entry['record'] as Map<String, dynamic>);
+      if (old.isEmpty || replacement.path.isEmpty) throw const FormatException();
     } catch (_) {
-      // Do not filter missing old paths or overwrite a pending journal when
-      // recovery cannot persist the replacement record.
-      rethrow;
+      // Preserve malformed metadata for recovery, without blocking the library.
+      await _persist(prefs, () => prefs.setString('${_renameKey}_corrupt', pending));
+      await _persist(prefs, () => prefs.remove(_renameKey));
+      return;
     }
+    final destinationExists = await File(replacement.path).exists();
+    final sourceExists = await File(old).exists();
+    if (destinationExists && !sourceExists) {
+      final recovered = <String>[jsonEncode(replacement.toJson())];
+      for (final raw in prefs.getStringList(_key) ?? <String>[]) {
+        try {
+          final record = PdfRecord.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+          if (record.path != old && record.path != replacement.path) recovered.add(raw);
+        } catch (_) {
+          // Match normal library loading: an invalid unrelated row is skipped.
+        }
+      }
+      // Persistence failures must retain the valid journal for the next attempt.
+      await _persist(prefs, () => prefs.setStringList(_key, recovered));
+    }
+    await _persist(prefs, () => prefs.remove(_renameKey));
   }
 
   Future<PdfRecord> renameRecord(

@@ -78,6 +78,10 @@ class PdfService {
 
   final Future<Directory> Function() _documentsDirectoryProvider;
   final Future<Directory> Function() _temporaryDirectoryProvider;
+  final Map<String, String> _displayNames = {};
+
+  String displayName(File file) => _displayNames[file.path] ?? file.uri.pathSegments.last;
+
   final Set<String> _managedTemporaryPaths = <String>{};
   static final Set<String> _activeTemporaryPaths = <String>{};
 
@@ -105,6 +109,7 @@ class PdfService {
 
   Future<void> secureDeleteTemporary(File? file) async {
     if (file == null || !isManagedTemporaryFile(file)) return;
+    _displayNames.remove(file.path);
     _managedTemporaryPaths.remove(file.path);
     _activeTemporaryPaths.remove(file.path);
     try {
@@ -309,6 +314,7 @@ class PdfService {
 
   Future<File> _materialize(PlatformFile picked) async {
     final file = await _newManagedTempFile('picked');
+    _displayNames[file.path] = picked.name;
     try {
       final path = picked.path;
       if (path != null && await File(path).exists()) {
@@ -1531,13 +1537,16 @@ class PdfService {
   Future<File> decryptToTemporary(File source, String password) async {
     final output = await _newManagedTempFile('decrypted', extension: 'pdf');
     final pdf = Pdf();
-    final sink = await FileSink.create(output);
+    FileSink? sink;
     try {
+      sink = await FileSink.create(output);
       await pdf.decrypt(FileSource(source), sink, password: password);
       await sink.close();
+      sink = null;
+      _displayNames[output.path] = displayName(source);
       return output;
     } catch (_) {
-      await sink.close();
+      try { await sink?.close(); } catch (_) {}
       await secureDeleteTemporary(output);
       rethrow;
     } finally {
@@ -1546,26 +1555,12 @@ class PdfService {
   }
 
   Future<File> createScannedPdfFromFiles(List<String> paths) async {
-    if (paths.isEmpty) {
-      throw ArgumentError('No scanned pages supplied.');
-    }
-    final output = await _newFile('Scan');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
+    if (paths.isEmpty) throw ArgumentError('No scanned pages supplied.');
     try {
-      await pdf.imagesToPdf([
+      return await _writeNewPdf('Scan', (pdf, sink) => pdf.imagesToPdf([
         for (final path in paths) FileSource(File(path)) as DataSource,
-      ], sink);
-      await sink.close();
-      return output;
-    } catch (_) {
-      await sink.close();
-      try {
-        if (await output.exists()) await output.delete();
-      } catch (_) {}
-      rethrow;
+      ], sink));
     } finally {
-      await pdf.dispose();
       final temp = await _tmp();
       for (final path in paths) {
         try {

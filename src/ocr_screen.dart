@@ -250,7 +250,9 @@ class _OcrScreenState extends State<OcrScreen> {
 
   Future<void> _extract() async {
     final source = _source;
-    if (source == null) return;
+    if (source == null || _busy) return;
+    setState(() => _busy = true);
+    try {
     if (!await _ensureLargeOcrUnlocked() || !mounted) return;
 
     setState(() {
@@ -323,6 +325,11 @@ class _OcrScreenState extends State<OcrScreen> {
       _operation = null;
       if (mounted) setState(() => _busy = false);
     }
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Could not start OCR: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<bool> _confirmSignedPdfModification() async {
@@ -354,7 +361,9 @@ class _OcrScreenState extends State<OcrScreen> {
 
   Future<void> _makeSearchable() async {
     final source = _source;
-    if (source == null) return;
+    if (source == null || _busy) return;
+    setState(() => _busy = true);
+    try {
     if (!await _ensureLargeOcrUnlocked() || !mounted) return;
     if (!await _confirmSignedPdfModification() || !mounted) return;
 
@@ -398,6 +407,11 @@ class _OcrScreenState extends State<OcrScreen> {
       _operation = null;
       if (mounted) setState(() => _busy = false);
     }
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Could not start OCR: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -424,7 +438,7 @@ class _OcrScreenState extends State<OcrScreen> {
                 child: ListTile(
                   leading: const Icon(Icons.document_scanner_outlined),
                   title: Text(
-                    _source?.uri.pathSegments.last ?? 'No PDF selected',
+                    (_source == null ? null : widget.service.displayName(_source!)) ?? 'No PDF selected',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),

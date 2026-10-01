@@ -181,11 +181,9 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
                       )
                     : _busy || size == null || corners == null
                     ? const CircularProgressIndicator()
-                    : FittedBox(
-                        fit: BoxFit.contain,
+                    : AspectRatio(
+                        aspectRatio: size.width / size.height,
                         child: SizedBox(
-                          width: size.width,
-                          height: size.height,
                           child: Stack(
                             fit: StackFit.expand,
                             children: [

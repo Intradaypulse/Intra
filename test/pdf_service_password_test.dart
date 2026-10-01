@@ -13,6 +13,8 @@ final class _PickedFile extends PlatformFile {
   @override
   final String path;
   @override
+  String get name => File(path).uri.pathSegments.last;
+  @override
   Future<Uint8List> readAsBytes() => File(path).readAsBytes();
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -61,6 +63,16 @@ void main() {
     await file.writeAsBytes(await doc.save(), flush: true);
     return file;
   }
+
+  test('managed picker copies retain original display names', () async {
+    final source = await createThreePagePdf();
+    final picker = _PickerService(docs, temp, [_PickedFile(source.path)]);
+    final files = await picker.pickPdfFiles();
+    expect(files.single.path, isNot(source.path));
+    expect(picker.displayName(files.single), 'source.pdf');
+    await picker.secureDeleteTemporary(files.single);
+    expect(await source.exists(), isTrue);
+  });
 
   test(
     'organizer removes work and partial output when extraction fails',
