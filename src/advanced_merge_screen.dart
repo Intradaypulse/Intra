@@ -186,132 +186,132 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-      appBar: AppBar(
-        title: const Text('Merge PDFs'),
-        actions: [
-          IconButton(
-            tooltip: 'Add PDFs',
-            onPressed: _busy ? null : _add,
-            icon: const Icon(Icons.add_rounded),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(child: Text(_status)),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _busy ? null : _add,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add'),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: _items.isEmpty
-                  ? const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.call_merge_rounded, size: 84),
-                          SizedBox(height: 12),
-                          Text('Add PDFs to begin'),
-                        ],
-                      ),
-                    )
-                  : ReorderableListView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
-                      itemCount: _items.length,
-                      buildDefaultDragHandles: !_busy,
-                      onReorderItem: (oldIndex, newIndex) {
-                        if (_busy) return;
-                        setState(() {
-                          final item = _items.removeAt(oldIndex);
-                          _items.insert(newIndex, item);
-                        });
-                      },
-                      itemBuilder: (context, index) {
-                        final item = _items[index];
-                        return Card(
-                          key: ValueKey(
-                            '${item.file.path}-$index',
-                          ),
-                          child: ListTile(
-                            leading: SizedBox(
-                              width: 52,
-                              height: 68,
-                              child: item.thumb == null
-                                  ? const DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        color: Color(0x11000000),
-                                      ),
-                                      child: Icon(
-                                        Icons.picture_as_pdf_rounded,
-                                      ),
-                                    )
-                                  : ClipRRect(
-                                      borderRadius: BorderRadius.circular(5),
-                                      child: Image.memory(
-                                        item.thumb!,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                            ),
-                            title: Text(
-                              item.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              '#${index + 1} • ${_formatBytes(item.size)}',
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Remove',
-                                  onPressed: _busy
-                                      ? null
-                                      : () => _removeItem(index),
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                  ),
-                                ),
-                                const Icon(Icons.drag_handle_rounded),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed:
-                      (_busy || _items.length < 2) ? null : _merge,
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.call_merge_rounded),
-                  label: Text('Merge ${_items.length} PDFs'),
-                ),
-              ),
+        appBar: AppBar(
+          title: const Text('Merge PDFs'),
+          actions: [
+            IconButton(
+              tooltip: 'Add PDFs',
+              onPressed: _busy ? null : _add,
+              icon: const Icon(Icons.add_rounded),
             ),
           ],
         ),
-      ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(_status)),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _add,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add'),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _items.isEmpty
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.call_merge_rounded, size: 84),
+                            SizedBox(height: 12),
+                            Text('Add PDFs to begin'),
+                          ],
+                        ),
+                      )
+                    : ReorderableListView.builder(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
+                        itemCount: _items.length,
+                        buildDefaultDragHandles: !_busy,
+                        onReorderItem: (oldIndex, newIndex) {
+                          if (_busy) return;
+                          setState(() {
+                            final item = _items.removeAt(oldIndex);
+                            _items.insert(newIndex, item);
+                          });
+                        },
+                        itemBuilder: (context, index) {
+                          final item = _items[index];
+                          return Card(
+                            key: ValueKey(
+                              '${item.file.path}-$index',
+                            ),
+                            child: ListTile(
+                              leading: SizedBox(
+                                width: 52,
+                                height: 68,
+                                child: item.thumb == null
+                                    ? const DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: Color(0x11000000),
+                                        ),
+                                        child: Icon(
+                                          Icons.picture_as_pdf_rounded,
+                                        ),
+                                      )
+                                    : ClipRRect(
+                                        borderRadius: BorderRadius.circular(5),
+                                        child: Image.memory(
+                                          item.thumb!,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                              ),
+                              title: Text(
+                                item.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                '#${index + 1} • ${_formatBytes(item.size)}',
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Remove',
+                                    onPressed: _busy
+                                        ? null
+                                        : () => _removeItem(index),
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                    ),
+                                  ),
+                                  const Icon(Icons.drag_handle_rounded),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed:
+                        (_busy || _items.length < 2) ? null : _merge,
+                    icon: _busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.call_merge_rounded),
+                    label: Text('Merge ${_items.length} PDFs'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

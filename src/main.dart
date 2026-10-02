@@ -71,18 +71,18 @@ class _PDFMateAppState extends State<PDFMateApp> {
     _loadingSettings = true;
     if (mounted) setState(() => _settingsError = null);
     try {
-    final values = await Future.wait<Object>([
-      _settings.loadThemeMode(),
-      _settings.loadAutoSaveDownloads(),
-      _settings.isOnboardingComplete(),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _themeMode = values[0] as ThemeMode;
-      _autoSaveDownloads = values[1] as bool;
-      _onboardingComplete = values[2] as bool;
-      _ready = true;
-    });
+      final values = await Future.wait<Object>([
+        _settings.loadThemeMode(),
+        _settings.loadAutoSaveDownloads(),
+        _settings.isOnboardingComplete(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _themeMode = values[0] as ThemeMode;
+        _autoSaveDownloads = values[1] as bool;
+        _onboardingComplete = values[2] as bool;
+        _ready = true;
+      });
     } catch (_) {
       if (mounted) setState(() => _settingsError = 'Could not load settings.');
     } finally {
@@ -272,13 +272,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadFiles() async {
     final generation = ++_libraryLoadGeneration;
     try {
-    final files = await _store.load();
-    final sizes = <String, int>{};
-    await Future.wait([
-      for (final record in files)
-        () async {
-          try {
-            sizes[record.path] = await File(record.path).length();
+      final files = await _store.load();
+      final sizes = <String, int>{};
+      await Future.wait([
+        for (final record in files)
+          () async {
+            try {
+              sizes[record.path] = await File(record.path).length();
           } catch (_) {
             sizes[record.path] = 0;
           }
@@ -1071,7 +1071,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  if (files.isEmpty)
+                  if (files.isEmpty && _libraryError == null)
                     Container(
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(

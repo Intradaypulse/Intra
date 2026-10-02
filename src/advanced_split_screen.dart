@@ -260,104 +260,104 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-      appBar: AppBar(title: const Text('Advanced split')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.picture_as_pdf_outlined),
-                title: Text(
-                  (_source == null ? null : widget.service.displayName(_source!)) ?? 'No PDF selected',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  _pageCount == 0 ? _status : '$_pageCount pages',
-                ),
-                trailing: OutlinedButton(
-                  onPressed: _busy ? null : _pick,
-                  child: const Text('Choose'),
+        appBar: AppBar(title: const Text('Advanced split')),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.picture_as_pdf_outlined),
+                  title: Text(
+                    (_source == null ? null : widget.service.displayName(_source!)) ?? 'No PDF selected',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    _pageCount == 0 ? _status : '$_pageCount pages',
+                  ),
+                  trailing: OutlinedButton(
+                    onPressed: _busy ? null : _pick,
+                    child: const Text('Choose'),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            SegmentedButton<SplitMode>(
-              segments: const [
-                ButtonSegment(
-                  value: SplitMode.everyPage,
-                  icon: Icon(Icons.filter_1_outlined),
-                  label: Text('Each page'),
+              const SizedBox(height: 16),
+              SegmentedButton<SplitMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: SplitMode.everyPage,
+                    icon: Icon(Icons.filter_1_outlined),
+                    label: Text('Each page'),
+                  ),
+                  ButtonSegment(
+                    value: SplitMode.everyN,
+                    icon: Icon(Icons.view_agenda_outlined),
+                    label: Text('Every N'),
+                  ),
+                  ButtonSegment(
+                    value: SplitMode.custom,
+                    icon: Icon(Icons.tune_rounded),
+                    label: Text('Custom'),
+                  ),
+                ],
+                selected: {_mode},
+                onSelectionChanged: _busy
+                    ? null
+                    : (value) => setState(() => _mode = value.first),
+              ),
+              const SizedBox(height: 20),
+              if (_mode == SplitMode.everyPage)
+                const ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.info_outline),
+                  title: Text('One PDF file will be created for every page.'),
                 ),
-                ButtonSegment(
-                  value: SplitMode.everyN,
-                  icon: Icon(Icons.view_agenda_outlined),
-                  label: Text('Every N'),
+              if (_mode == SplitMode.everyN)
+                TextField(
+                  controller: _everyController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Pages per output file',
+                    hintText: 'Example: 5',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-                ButtonSegment(
-                  value: SplitMode.custom,
-                  icon: Icon(Icons.tune_rounded),
-                  label: Text('Custom'),
+              if (_mode == SplitMode.custom) ...[
+                TextField(
+                  controller: _rangeController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Custom output groups',
+                    hintText: '1-3;4-6;7,9,11',
+                    helperText:
+                        'Use semicolon between output files. Use commas/ranges inside each file.',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Example: 1-3;4-6;7,9 creates 3 PDFs: pages 1–3, pages 4–6, and pages 7 + 9.',
                 ),
               ],
-              selected: {_mode},
-              onSelectionChanged: _busy
-                  ? null
-                  : (value) => setState(() => _mode = value.first),
-            ),
-            const SizedBox(height: 20),
-            if (_mode == SplitMode.everyPage)
-              const ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.info_outline),
-                title: Text('One PDF file will be created for every page.'),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed:
+                    (_busy || _source == null || _pageCount == 0) ? null : _run,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.content_cut_rounded),
+                label: const Text('Split PDF'),
               ),
-            if (_mode == SplitMode.everyN)
-              TextField(
-                controller: _everyController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Pages per output file',
-                  hintText: 'Example: 5',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            if (_mode == SplitMode.custom) ...[
-              TextField(
-                controller: _rangeController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Custom output groups',
-                  hintText: '1-3;4-6;7,9,11',
-                  helperText:
-                      'Use semicolon between output files. Use commas/ranges inside each file.',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Example: 1-3;4-6;7,9 creates 3 PDFs: pages 1–3, pages 4–6, and pages 7 + 9.',
-              ),
+              const SizedBox(height: 12),
+              Text(_status),
             ],
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed:
-                  (_busy || _source == null || _pageCount == 0) ? null : _run,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.content_cut_rounded),
-              label: const Text('Split PDF'),
-            ),
-            const SizedBox(height: 12),
-            Text(_status),
-          ],
+          ),
         ),
-      ),
       ),
     );
   }
