@@ -279,6 +279,14 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     super.dispose();
   }
 
+  Future<Uint8List?> _thumbnail(int index) {
+    final control = PdfOperationControl();
+    return _thumbs.getOrCreate(index,
+      () => widget.service.renderPage(_source!, index, width: 180, control: control),
+      onDiscard: control.cancel,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final preview = _preview;
@@ -353,14 +361,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: FutureBuilder<Uint8List?>(
-                                  future: _thumbs.getOrCreate(
-                                    index,
-                                    () => widget.service.renderPage(
-                                      _source!,
-                                      index,
-                                      width: 180,
-                                    ),
-                                  ),
+                                  future: _thumbnail(index),
                                   builder: (context, snapshot) =>
                                       snapshot.data == null
                                       ? const Icon(

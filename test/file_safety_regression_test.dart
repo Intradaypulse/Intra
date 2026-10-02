@@ -24,6 +24,14 @@ void main() {
   });
   tearDown(() async => root.delete(recursive: true));
 
+  test('cancelled thumbnail does not open a missing PDF', () async {
+    final control = PdfOperationControl()..cancel();
+    expect(await service.renderPage(File('${root.path}/missing.pdf'), 0,
+        control: control), isNull);
+    expect(await service.renderFirstThumbnail(File('${root.path}/missing.pdf'),
+        control: control), isNull);
+  });
+
   test('rename collision preserves both documents', () async {
     final source = await File(
       '${root.path}/source.pdf',

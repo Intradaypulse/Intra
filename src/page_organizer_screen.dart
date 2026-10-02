@@ -77,6 +77,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
   Future<Uint8List?> _thumbnailFor(int originalIndex) {
     final source = _source;
     if (source == null) return Future<Uint8List?>.value(null);
+    final control = PdfOperationControl();
     return _thumbCache.getOrCreate(
       originalIndex,
       () => widget.service.renderPage(
@@ -84,7 +85,9 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
         originalIndex,
         password: _password,
         width: 260,
+        control: control,
       ),
+      onDiscard: control.cancel,
     );
   }
 

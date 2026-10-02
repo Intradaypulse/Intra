@@ -901,23 +901,8 @@ class PdfService {
     File source, {
     String? password,
     int width = 220,
-  }) async {
-    final pdf = Pdf();
-    PdfDoc? doc;
-    try {
-      doc = await pdf.open(FileSource(source), password: password);
-      await for (final page in doc.render(
-        pages: const PdfPages.single(0),
-        size: PdfRenderSize.thumbnail(width),
-      )) {
-        return page.data;
-      }
-      return null;
-    } finally {
-      await doc?.dispose();
-      await pdf.dispose();
-    }
-  }
+    PdfOperationControl? control,
+  }) => renderPage(source, 0, password: password, width: width, control: control);
 
   Future<List<PdfPageInfo>> pageInfos(File source, {String? password}) async {
     final pdf = Pdf();
@@ -978,17 +963,24 @@ class PdfService {
     int pageIndex, {
     String? password,
     int width = 1200,
+    PdfOperationControl? control,
   }) => _renderQueue.run(() async {
+    // Evicted queued jobs must not open or render a PDF.
+    try { control?.check(); } on PdfOperationCancelled { return null; }
     final pdf = Pdf();
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      control?.check();
       await for (final page in doc.render(
         pages: PdfPages.single(pageIndex),
         size: PdfRenderSize.thumbnail(width),
       )) {
+        control?.check();
         return page.data;
       }
+      return null;
+    } on PdfOperationCancelled {
       return null;
     } finally {
       await doc?.dispose();

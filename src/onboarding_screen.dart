@@ -36,6 +36,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   ];
 
   Future<void> _next() async {
+    if (_finishing) return;
     if (_page < _items.length - 1) {
       await _controller.nextPage(
         duration: const Duration(milliseconds: 280),
@@ -44,9 +45,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       return;
     }
 
+    await _finish();
+  }
+
+  Future<void> _finish() async {
+    if (_finishing) return;
     setState(() => _finishing = true);
     try {
       await widget.onFinished();
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save onboarding. Please retry.')),
+      );
     } finally {
       if (mounted) setState(() => _finishing = false);
     }
@@ -69,7 +79,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: _finishing ? null : widget.onFinished,
+                onPressed: _finishing ? null : _finish,
                 child: const Text('Skip'),
               ),
             ),

@@ -4,7 +4,7 @@ import 'ads_service.dart';
 import 'privacy_policy_screen.dart';
 import 'telemetry_service.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     required this.themeMode,
@@ -17,6 +17,39 @@ class SettingsScreen extends StatelessWidget {
   final bool autoSaveDownloads;
   final Future<void> Function(ThemeMode mode) onThemeChanged;
   final Future<void> Function(bool value) onAutoSaveChanged;
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late ThemeMode _themeMode = widget.themeMode;
+  late bool _autoSaveDownloads = widget.autoSaveDownloads;
+  bool _saving = false;
+
+  @override
+  void didUpdateWidget(covariant SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.themeMode != widget.themeMode) _themeMode = widget.themeMode;
+    if (oldWidget.autoSaveDownloads != widget.autoSaveDownloads) {
+      _autoSaveDownloads = widget.autoSaveDownloads;
+    }
+  }
+
+  Future<void> _save(Future<void> Function() write, VoidCallback apply) async {
+    if (_saving || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await write();
+      if (mounted) setState(apply);
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save settings. Please retry.')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   String _themeLabel(ThemeMode mode) => switch (mode) {
         ThemeMode.system => 'System default',
@@ -40,15 +73,15 @@ class SettingsScreen extends StatelessWidget {
             child: ListTile(
               leading: const Icon(Icons.palette_outlined),
               title: const Text('Theme'),
-              subtitle: Text(_themeLabel(themeMode)),
+              subtitle: Text(_themeLabel(_themeMode)),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () async {
+              onTap: _saving ? null : () async {
                 final value = await showModalBottomSheet<ThemeMode>(
                   context: context,
                   showDragHandle: true,
                   builder: (context) => SafeArea(
                     child: RadioGroup<ThemeMode>(
-                      groupValue: themeMode,
+                      groupValue: _themeMode,
                       onChanged: (selected) {
                         if (selected != null) {
                           Navigator.pop(context, selected);
@@ -67,7 +100,10 @@ class SettingsScreen extends StatelessWidget {
                     ),
                   ),
                 );
-                if (value != null) await onThemeChanged(value);
+                if (value != null && mounted) {
+                  await _save(() => widget.onThemeChanged(value),
+                      () => _themeMode = value);
+                }
               },
             ),
           ),
@@ -80,8 +116,11 @@ class SettingsScreen extends StatelessWidget {
           Card(
             child: SwitchListTile(
               secondary: const Icon(Icons.download_done_rounded),
-              value: autoSaveDownloads,
-              onChanged: onAutoSaveChanged,
+              value: _autoSaveDownloads,
+              onChanged: _saving ? null : (value) => _save(
+                () => widget.onAutoSaveChanged(value),
+                () => _autoSaveDownloads = value,
+              ),
               title: const Text('Auto-save a copy to Downloads'),
               subtitle: const Text(
                 'After a PDF is created, keep an extra copy in Download/PDFMate on supported Android versions.',

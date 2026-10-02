@@ -185,6 +185,7 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
   }
 
   Future<void> _run() async {
+    if (_busy) return;
     final source = _source;
     if (source == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -256,7 +257,9 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
       appBar: AppBar(title: const Text('Advanced split')),
       body: SafeArea(
         child: ListView(
@@ -354,6 +357,7 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
             Text(_status),
           ],
         ),
+      ),
       ),
     );
   }

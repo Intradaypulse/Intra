@@ -145,6 +145,7 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
   }
 
   Future<void> _merge() async {
+    if (_busy) return;
     if (_items.length < 2) return;
     setState(() {
       _busy = true;
@@ -182,7 +183,9 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Merge PDFs'),
         actions: [
@@ -308,6 +311,7 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

@@ -2,6 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pdfmate/lru_future_cache.dart';
 
 void main() {
+  test('eviction, removal and clear cancel each discarded job once', () async {
+    final cache = LruFutureCache<int, int>(capacity: 1);
+    final cancelled = <int>[];
+    await cache.getOrCreate(1, () async => 1, onDiscard: () => cancelled.add(1));
+    await cache.getOrCreate(1, () async => 99, onDiscard: () => cancelled.add(99));
+    expect(cancelled, isEmpty);
+    await cache.getOrCreate(2, () async => 2, onDiscard: () => cancelled.add(2));
+    expect(cancelled, [1]);
+    cache.remove(2);
+    cache.remove(2);
+    await cache.getOrCreate(3, () async => 3, onDiscard: () => cancelled.add(3));
+    cache.clear();
+    expect(cancelled, [1, 2, 3]);
+  });
+
   test('LRU cache evicts least recently used entry', () async {
     final cache = LruFutureCache<int, String>(capacity: 2);
     var loads = 0;

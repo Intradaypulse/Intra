@@ -2,6 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AppSettingsStore {
+  Future<void> _persist(SharedPreferences prefs, Future<bool> write) async {
+    try {
+      if (!await write) throw StateError('Settings could not be saved.');
+    } catch (_) {
+      // A failed platform write may still change the preferences memory cache.
+      try { await prefs.reload(); } catch (_) {}
+      rethrow;
+    }
+  }
+
   static const _themeKey = 'pdfmate_theme_mode';
   static const _autoSaveKey = 'pdfmate_auto_save_downloads';
   static const _onboardingKey = 'pdfmate_onboarding_complete';
@@ -17,14 +27,14 @@ class AppSettingsStore {
 
   Future<void> saveThemeMode(ThemeMode mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    await _persist(prefs, prefs.setString(
       _themeKey,
       switch (mode) {
         ThemeMode.light => 'light',
         ThemeMode.dark => 'dark',
         ThemeMode.system => 'system',
       },
-    );
+    ));
   }
 
   Future<bool> loadAutoSaveDownloads() async {
@@ -34,7 +44,7 @@ class AppSettingsStore {
 
   Future<void> saveAutoSaveDownloads(bool value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_autoSaveKey, value);
+    await _persist(prefs, prefs.setBool(_autoSaveKey, value));
   }
 
   Future<bool> isOnboardingComplete() async {
@@ -44,6 +54,6 @@ class AppSettingsStore {
 
   Future<void> completeOnboarding() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_onboardingKey, true);
+    await _persist(prefs, prefs.setBool(_onboardingKey, true));
   }
 }

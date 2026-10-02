@@ -43,16 +43,19 @@ Future<void> _initializeTelemetry() async {
 }
 
 class PDFMateApp extends StatefulWidget {
-  const PDFMateApp({super.key});
+  const PDFMateApp({super.key, this.settingsStore});
+  final AppSettingsStore? settingsStore;
 
   @override
   State<PDFMateApp> createState() => _PDFMateAppState();
 }
 
 class _PDFMateAppState extends State<PDFMateApp> {
-  final AppSettingsStore _settings = AppSettingsStore();
+  late final AppSettingsStore _settings = widget.settingsStore ?? AppSettingsStore();
 
   bool _ready = false;
+  bool _loadingSettings = false;
+  String? _settingsError;
   bool _onboardingComplete = false;
   bool _autoSaveDownloads = true;
   ThemeMode _themeMode = ThemeMode.system;
@@ -64,6 +67,10 @@ class _PDFMateAppState extends State<PDFMateApp> {
   }
 
   Future<void> _loadSettings() async {
+    if (_loadingSettings) return;
+    _loadingSettings = true;
+    if (mounted) setState(() => _settingsError = null);
+    try {
     final values = await Future.wait<Object>([
       _settings.loadThemeMode(),
       _settings.loadAutoSaveDownloads(),
@@ -76,6 +83,11 @@ class _PDFMateAppState extends State<PDFMateApp> {
       _onboardingComplete = values[2] as bool;
       _ready = true;
     });
+    } catch (_) {
+      if (mounted) setState(() => _settingsError = 'Could not load settings.');
+    } finally {
+      _loadingSettings = false;
+    }
   }
 
   Future<void> _setTheme(ThemeMode mode) async {
@@ -115,7 +127,7 @@ class _PDFMateAppState extends State<PDFMateApp> {
       ),
       themeMode: _themeMode,
       home: !_ready
-          ? const _LaunchScreen()
+          ? _LaunchScreen(error: _settingsError, onRetry: _loadSettings)
           : !_onboardingComplete
           ? OnboardingScreen(onFinished: _finishOnboarding)
           : HomeScreen(
@@ -129,7 +141,9 @@ class _PDFMateAppState extends State<PDFMateApp> {
 }
 
 class _LaunchScreen extends StatelessWidget {
-  const _LaunchScreen();
+  const _LaunchScreen({this.error, required this.onRetry});
+  final String? error;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +174,10 @@ class _LaunchScreen extends StatelessWidget {
               ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 18),
-            const SizedBox(
+            if (error != null) ...[
+              Text(error!, textAlign: TextAlign.center),
+              TextButton(onPressed: onRetry, child: const Text('Retry')),
+            ] else const SizedBox(
               width: 28,
               height: 28,
               child: CircularProgressIndicator(strokeWidth: 3),
@@ -198,6 +215,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _search = TextEditingController();
 
   List<PdfRecord> _files = [];
+  String? _libraryError;
+  int _libraryLoadGeneration = 0;
   final Map<String, int> _fileSizes = {};
   final LruFutureCache<String, Uint8List?> _thumbnailFutures =
       LruFutureCache<String, Uint8List?>(capacity: 32);
@@ -251,6 +270,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadFiles() async {
+    final generation = ++_libraryLoadGeneration;
+    try {
     final files = await _store.load();
     final sizes = <String, int>{};
     await Future.wait([
@@ -266,28 +287,38 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // The cache is bounded; clear entries when the document list changes so
     // renamed/deleted PDFs cannot leave stale thumbnail data behind.
+    if (!mounted || generation != _libraryLoadGeneration) return;
     _thumbnailFutures.clear();
 
-    if (mounted) {
+    if (mounted && generation == _libraryLoadGeneration) {
       setState(() {
+        _libraryError = null;
         _files = files;
         _fileSizes
           ..clear()
           ..addAll(sizes);
       });
     }
+    } catch (_) {
+      if (mounted && generation == _libraryLoadGeneration) {
+        setState(() => _libraryError = 'Could not load your PDF library.');
+      }
+    }
   }
 
-  Future<Uint8List?> _loadThumbnail(String path) async {
+  Future<Uint8List?> _loadThumbnail(String path, PdfOperationControl control) async {
     try {
-      return await _service.renderFirstThumbnail(File(path), width: 150);
+      return await _service.renderFirstThumbnail(File(path), width: 150, control: control);
     } catch (_) {
       return null;
     }
   }
 
-  Future<Uint8List?> _thumbnail(String path) =>
-      _thumbnailFutures.getOrCreate(path, () => _loadThumbnail(path));
+  Future<Uint8List?> _thumbnail(String path) {
+    final control = PdfOperationControl();
+    return _thumbnailFutures.getOrCreate(path, () => _loadThumbnail(path, control),
+        onDiscard: control.cancel);
+  }
 
   String _formatFileSize(int bytes) {
     const kb = 1024;
@@ -841,6 +872,12 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 8, 18, 110),
                 children: [
+                  if (_libraryError != null)
+                    Card(child: ListTile(
+                      title: Text(_libraryError!),
+                      trailing: TextButton(onPressed: _loadFiles,
+                          child: const Text('Retry')),
+                    )),
                   Container(
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
