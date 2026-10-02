@@ -206,6 +206,7 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER"
           for abi in arm64-v8a armeabi-v7a x86_64; do
+            python3 scripts/verify_work_database.py "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk"
             cp "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk" "PDFMate-RC-$abi.apk"
             "$APKSIGNER" verify --verbose "PDFMate-RC-$abi.apk"
             sha256sum "PDFMate-RC-$abi.apk" > "PDFMate-RC-$abi.apk.sha256"
@@ -366,7 +367,8 @@ jobs:
           retention-days: 7
 
 
-  reproduce-release-startup:
+  release-startup-smoke:
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -379,14 +381,12 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Download exact previously distributed release APK
+      - name: Download newly built release APK
         uses: actions/download-artifact@v4
         with:
           name: PDFMate-APK-x86_64
-          run-id: 36984228610
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: installed-release
-      - name: Launch distributed release APK twice
+      - name: Launch new release APK twice
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35

@@ -43,16 +43,10 @@ gradle.projectsEvaluated {
 }
 ''')
 
-# PDFBox declares its JPX codec as compileOnly. This bridge copies image streams
-# unchanged and extracts text; raster rendering is handled by pdf_manipulator.
-# Keep R8 enabled and scope rules to the two genuinely optional codec classes.
+# Include reviewed reflection/optional-codec rules in every release build.
+# A dedicated file keeps all CI/release/canary projects consistent.
 proguard = root / 'android/app/proguard-rules.pro'
-rules = proguard.read_text() if proguard.exists() else ''
-for codec in ['JP2Decoder', 'JP2Encoder']:
-    rule = f'-dontwarn com.gemalto.jp2.{codec}'
-    if rule not in rules:
-        rules += '\n' + rule + '\n'
-proguard.write_text(rules)
+proguard.write_text(Path('android_native/proguard-rules.pro').read_text())
 with gradle.open('a') as out:
     out.write('''
 android {
