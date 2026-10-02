@@ -7,6 +7,18 @@ import 'package:pdfmate/advanced_merge_screen.dart';
 import 'package:pdfmate/advanced_split_screen.dart';
 import 'package:pdfmate/pdf_service.dart';
 
+class MetadataFile implements File {
+  MetadataFile(this.path);
+  @override
+  final String path;
+  @override
+  Uri get uri => Uri.file(path);
+  @override
+  Future<int> length() async => 7;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class PendingService extends PdfService {
   PendingService(this.files);
   final List<File> files;
@@ -43,11 +55,7 @@ class PendingService extends PdfService {
 void main() {
   for (final merge in [false, true]) {
     testWidgets('${merge ? 'Merge' : 'Split'} blocks Back while using its input', (tester) async {
-      final root = await Directory.systemTemp.createTemp('pdfmate_back_');
-      final files = [
-        await File('${root.path}/a.pdf').writeAsString('input A'),
-        await File('${root.path}/b.pdf').writeAsString('input B'),
-      ];
+      final files = <File>[MetadataFile('/temp/a.pdf'), MetadataFile('/temp/b.pdf')];
       final service = PendingService(files);
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(MaterialApp(navigatorKey: navigator,
@@ -57,8 +65,6 @@ void main() {
         : AdvancedSplitScreen(service: service))));
       await tester.pumpAndSettle();
       await tester.tap(merge ? find.byTooltip('Add PDFs') : find.text('Choose'));
-      // Complete file-length I/O without pumping the active-operation spinner.
-      await tester.runAsync(() async { await Future<void>.delayed(const Duration(milliseconds: 50)); });
       await tester.pumpAndSettle();
       await tester.tap(find.text(merge ? 'Merge 2 PDFs' : 'Split PDF'));
       await tester.pump();
@@ -72,7 +78,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Library'), findsOneWidget);
       expect(service.deleted, contains(files.first.path));
-      await root.delete(recursive: true);
       expect(tester.takeException(), isNull);
     });
   }

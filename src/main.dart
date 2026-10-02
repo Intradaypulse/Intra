@@ -279,26 +279,26 @@ class _HomeScreenState extends State<HomeScreen> {
           () async {
             try {
               sizes[record.path] = await File(record.path).length();
-          } catch (_) {
-            sizes[record.path] = 0;
-          }
-        }(),
-    ]);
+            } catch (_) {
+              sizes[record.path] = 0;
+            }
+          }(),
+      ]);
 
-    // The cache is bounded; clear entries when the document list changes so
-    // renamed/deleted PDFs cannot leave stale thumbnail data behind.
-    if (!mounted || generation != _libraryLoadGeneration) return;
-    _thumbnailFutures.clear();
+      // The cache is bounded; clear entries when the document list changes so
+      // renamed/deleted PDFs cannot leave stale thumbnail data behind.
+      if (!mounted || generation != _libraryLoadGeneration) return;
+      _thumbnailFutures.clear();
 
-    if (mounted && generation == _libraryLoadGeneration) {
-      setState(() {
-        _libraryError = null;
-        _files = files;
-        _fileSizes
-          ..clear()
-          ..addAll(sizes);
-      });
-    }
+      if (mounted && generation == _libraryLoadGeneration) {
+        setState(() {
+          _libraryError = null;
+          _files = files;
+          _fileSizes
+            ..clear()
+            ..addAll(sizes);
+        });
+      }
     } catch (_) {
       if (mounted && generation == _libraryLoadGeneration) {
         setState(() => _libraryError = 'Could not load your PDF library.');
