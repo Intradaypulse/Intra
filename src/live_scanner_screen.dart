@@ -333,8 +333,9 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
             if (!_disposed &&
                 _foreground &&
                 identical(current, _controller) &&
-                !current.value.isStreamingImages)
+                !current.value.isStreamingImages) {
               await _resumeStream(current);
+            }
           });
         } catch (e) {
           if (mounted) setState(() => _error = 'Camera restart failed: $e');

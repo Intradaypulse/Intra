@@ -152,10 +152,11 @@ class _OcrScreenState extends State<OcrScreen> {
         if (mounted) setState(() => _busy = false);
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Could not choose PDF: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -275,10 +276,11 @@ class _OcrScreenState extends State<OcrScreen> {
 
     _operation = PdfOperationControl(
       onProgress: (completed, total) {
-        if (mounted)
+        if (mounted) {
           setState(
             () => _status = 'Processing page ${completed + 1} of $total…',
           );
+        }
       },
     );
     File? textFile;
@@ -387,10 +389,11 @@ class _OcrScreenState extends State<OcrScreen> {
 
     _operation = PdfOperationControl(
       onProgress: (completed, total) {
-        if (mounted)
+        if (mounted) {
           setState(
             () => _status = 'Processing page ${completed + 1} of $total…',
           );
+        }
       },
     );
     try {

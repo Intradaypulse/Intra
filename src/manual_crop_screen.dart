@@ -144,10 +144,11 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
         ),
       );
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Could not crop photo: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

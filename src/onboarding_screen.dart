@@ -54,9 +54,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       await widget.onFinished();
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not save onboarding. Please retry.')),
       );
+      }
     } finally {
       if (mounted) setState(() => _finishing = false);
     }

@@ -126,9 +126,10 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
       }
       if (mounted) setState(() => _status = '${_items.length} PDF(s). Drag to reorder before merging.');
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not add PDF: $e')),
       );
+      }
     } finally {
       for (final file in pending) {
         await widget.service.secureDeleteTemporary(file);

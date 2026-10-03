@@ -28,7 +28,8 @@ class ScanCaptureGate {
       final a = [previous.topLeft, previous.topRight, previous.bottomRight, previous.bottomLeft];
       final b = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
       if (List.generate(4, (i) => (a[i].x - b[i].x).abs() > .025 ||
-          (a[i].y - b[i].y).abs() > .025).any((moved) => moved)) reset();
+          (a[i].y - b[i].y).abs() > .025).any((moved) => moved)) { reset();
+      }
     }
     // Compare against the start of the hold, so slow cumulative drift cannot
     // look stable merely because consecutive frames moved only a little.

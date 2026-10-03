@@ -821,8 +821,9 @@ class PdfService {
     required Map<int, int> rotations,
     String? password,
   }) async {
-    if (pageOrder.isEmpty)
+    if (pageOrder.isEmpty) {
       throw ArgumentError('At least one page must remain.');
+    }
     final work = await _newManagedTempFile('organizer');
     final output = await _newFile('Organized');
     final engine = Pdf();
@@ -1252,12 +1253,14 @@ class PdfService {
           pageBytes = rendered.data;
           break;
         }
-        if (pageBytes == null)
+        if (pageBytes == null) {
           throw StateError('Could not render page ${index + 1}.');
+        }
 
         final decoded = img.decodePng(pageBytes);
-        if (decoded == null)
+        if (decoded == null) {
           throw StateError('Could not decode page ${index + 1}.');
+        }
 
         final tempImage = await _newManagedTempFile(
           'native_ocr_$index',
@@ -1317,8 +1320,9 @@ class PdfService {
                   cx <= m.rect.x + m.rect.width &&
                   cy >= m.rect.y &&
                   cy <= m.rect.y + m.rect.height,
-            ))
+            )) {
               continue;
+            }
           }
 
           control?.check();
@@ -1492,11 +1496,13 @@ class PdfService {
           bytes = page.data;
           break;
         }
-        if (bytes == null)
+        if (bytes == null) {
           throw StateError('Could not render page ${index + 1}.');
+        }
         final image = img.decodePng(bytes);
-        if (image == null)
+        if (image == null) {
           throw StateError('Could not decode page ${index + 1}.');
+        }
         final input = await _newManagedTempFile('ocr_input', extension: 'png');
         RecognizedText recognized;
         try {
@@ -1532,8 +1538,9 @@ class PdfService {
                   cx <= m.rect.right &&
                   cy >= m.rect.y &&
                   cy <= m.rect.bottom,
-            ))
+            )) {
               continue;
+            }
           }
           words.add(
             ocrWordGeometry(

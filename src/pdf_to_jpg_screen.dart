@@ -176,10 +176,11 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
         if (mounted) setState(() => _busy = false);
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Could not choose PDF: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

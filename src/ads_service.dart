@@ -274,8 +274,9 @@ class AdsService {
   }
 
   void _loadInterstitial() {
-    if (!_canRequestAds || _interstitial != null || _loadingInterstitial)
+    if (!_canRequestAds || _interstitial != null || _loadingInterstitial) {
       return;
+    }
     _loadingInterstitial = true;
     final generation = _consentGeneration;
     InterstitialAd.load(
@@ -422,8 +423,9 @@ class AdsService {
   Future<RewardedAdOutcome> showRewardedGate() async {
     if (_isShowingFullScreenAd) return RewardedAdOutcome.unavailable;
     final ready = await ensureRewardedReady();
-    if (!ready || !_canRequestAds || _isShowingFullScreenAd)
+    if (!ready || !_canRequestAds || _isShowingFullScreenAd) {
       return RewardedAdOutcome.unavailable;
+    }
 
     final ad = _rewarded;
     if (ad == null) return RewardedAdOutcome.unavailable;
@@ -505,15 +507,17 @@ class AdsService {
         !_canRequestAds ||
         _sessionCount < 3 ||
         _isShowingFullScreenAd ||
-        recentlyShowedFullScreenAd)
+        recentlyShowedFullScreenAd) {
       return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     if (!_appOpenEnabled ||
         !_canRequestAds ||
         _isShowingFullScreenAd ||
-        recentlyShowedFullScreenAd)
+        recentlyShowedFullScreenAd) {
       return;
+    }
     final lastMs = prefs.getInt(_lastAppOpenKey);
     if (lastMs != null) {
       final lastShown = DateTime.fromMillisecondsSinceEpoch(lastMs);

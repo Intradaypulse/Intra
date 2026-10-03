@@ -46,8 +46,9 @@ class _SignatureScreenState extends State<SignatureScreen> {
       if (!mounted) return;
       Navigator.of(context).pop(bytes);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Signature export failed: $e')));
+      }
     } finally {
       if (mounted) setState(() => _exporting = false);
     }

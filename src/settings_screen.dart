@@ -43,9 +43,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await write();
       if (mounted) setState(apply);
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not save settings. Please retry.')),
       );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

@@ -333,10 +333,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           shrinkWrap: true,
           itemCount: matches.length + 1,
           itemBuilder: (context, index) {
-            if (index == 0) return ListTile(
+            if (index == 0) { return ListTile(
               title: Text('${matches.length} matching page(s)'),
               subtitle: Text('“$query”'),
             );
+            }
             final match = matches[index - 1];
             return ListTile(
               leading: const Icon(Icons.find_in_page_outlined),

@@ -52,8 +52,9 @@ class _SecurityScreenState extends State<SecurityScreen> {
         await widget.service.secureDeleteTemporary(previous);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not choose PDF: $e')));
+      }
     } finally {
       if (candidate != null && (_source?.path != candidate.path || !mounted)) {
         await widget.service.secureDeleteTemporary(candidate);
