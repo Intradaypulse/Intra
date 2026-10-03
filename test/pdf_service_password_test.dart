@@ -383,12 +383,12 @@ void main() {
     }
   });
 
-  test('scanner temporary page files are deleted after PDF assembly', () async {
+  test('scanner page files are retained until library registration', () async {
     final page = File('${temp.path}/pdfmate_scan_fixture.png');
     await page.writeAsBytes(img.encodePng(img.Image(width: 24, height: 48)));
     final output = await service.createScannedPdfFromFiles([page.path]);
     expect(await output.exists(), isTrue);
-    expect(await page.exists(), isFalse);
+    expect(await page.exists(), isTrue);
   });
 
   test(

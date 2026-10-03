@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
+import 'output_protection.dart';
 
 class CompressionScreen extends StatefulWidget {
   const CompressionScreen({super.key, required this.service});
@@ -131,6 +132,13 @@ class _CompressionScreenState extends State<CompressionScreen> {
     final source = _source;
     if (source == null || _busy) return;
 
+    if (_password != null && _password!.isNotEmpty) {
+      setState(() => _busy = true);
+      final allowed = await confirmUnprotectedOutput(context);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      if (!allowed) return;
+    }
     final oldResult = _result;
     setState(() {
       _busy = true;

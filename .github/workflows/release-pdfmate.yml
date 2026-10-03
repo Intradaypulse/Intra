@@ -336,10 +336,16 @@ jobs:
 
       - name: Verify production signatures and checksums
         shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           test -f buildapp/build/app/outputs/bundle/release/app-release.aab
           cp buildapp/build/app/outputs/bundle/release/app-release.aab PDFMate-release.aab
-          jarsigner -verify -strict -certs PDFMate-release.aab
+          # Trust only the configured upload identity, not an arbitrary signer.
+          keytool -exportcert -keystore buildapp/android/app/pdfmate-upload.jks -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" -file /tmp/pdfmate-upload.cer
+          keytool -importcert -noprompt -keystore /tmp/pdfmate-verify.p12 -storepass verification-only -alias expected-upload -file /tmp/pdfmate-upload.cer
+          jarsigner -verify -strict -certs -keystore /tmp/pdfmate-verify.p12 -storepass verification-only PDFMate-release.aab expected-upload
 
           mkdir -p release-apks
           cp buildapp/build/app/outputs/flutter-apk/app-*-release.apk release-apks/
@@ -354,6 +360,31 @@ jobs:
           sha256sum PDFMate-release.aab | tee PDFMate-release.aab.sha256
           sha256sum release-apks/*.apk | tee PDFMate-release-apks.sha256
           ls -lh PDFMate-release.aab release-apks/*.apk
+
+      - name: Enable KVM for production startup test
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Cold-launch exact production APK twice
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash scripts/check_release_launch.sh release-apks/app-x86_64-release.apk
+
+      - name: Upload production startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Production-startup-diagnostics
+          path: release-launch-logs/
+          if-no-files-found: ignore
 
       - name: Upload production release artifacts
         uses: actions/upload-artifact@v4

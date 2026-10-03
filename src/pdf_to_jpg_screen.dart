@@ -19,6 +19,7 @@ class PdfToJpgScreen extends StatefulWidget {
 class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
   File? _source;
   final List<File> _images = [];
+  int _startPage = 0;
   final Set<int> _selected = {};
   bool _busy = false;
   PdfOperationControl? _operation;
@@ -126,6 +127,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
             final previousImages = List<File>.of(_images);
             setState(() {
               _source = file;
+              _startPage = range.$1;
               _images
                 ..clear()
                 ..addAll(outputs);
@@ -187,15 +189,15 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
   }
 
   Future<void> _shareSelected() async {
-    if (_selected.isEmpty) return;
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [
-          for (final i in _selected.toList()..sort()) XFile(_images[i].path),
-        ],
-        text: 'PDF pages exported by PDFMate',
-      ),
-    );
+    if (_selected.isEmpty || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await SharePlus.instance.share(ShareParams(
+        files: [for (final i in _selected.toList()..sort()) XFile(_images[i].path)],
+        text: 'PDF pages exported by PDFMate'));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error')));
+    } finally { if (mounted) setState(() => _busy = false); }
   }
 
   Future<void> _saveSelected() async {
@@ -397,7 +399,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
                                       borderRadius: BorderRadius.circular(5),
                                     ),
                                     child: Text(
-                                      'Page ${index + 1}',
+                                      'Page ${_startPage + index + 1}',
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 11,

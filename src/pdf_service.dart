@@ -211,7 +211,21 @@ class PdfService {
   Future<File> _newFile(String prefix) async {
     final dir = await _docs();
     final stamp = DateTime.now().microsecondsSinceEpoch;
-    return File('${dir.path}/${_safe(prefix)}_$stamp.pdf');
+    return File('${dir.path}/${_safe(prefix)}_$stamp.pdf.pending');
+  }
+
+  Future<File> _commitOutput(File file) async {
+    if (!file.path.endsWith('.pdf.pending')) return file;
+    return file.rename(file.path.substring(0, file.path.length - '.pending'.length));
+  }
+
+  /// Only complete, atomically published PDFs are candidates for recovery.
+  Future<List<File>> recoverableOutputs() async {
+    final dir = await _docs();
+    if (!await dir.exists()) return [];
+    return [await for (final entity in dir.list(followLinks: false))
+      if (entity is File && entity.path.endsWith('.pdf') &&
+          !entity.uri.pathSegments.last.startsWith('pdfmate_secure_tmp_')) entity];
   }
 
   static final _renameQueue = SerialExecutor();
@@ -250,7 +264,7 @@ class PdfService {
     }
     final output = await _newFile(prefix);
     await source.copy(output.path);
-    return output;
+    return _commitOutput(output);
   }
 
   Future<String?> exportPdf(File source, String fileName) async {
@@ -386,7 +400,7 @@ class PdfService {
         images: PdfImagePolicy.ebook,
       );
       await sink.close();
-      return outputFile;
+      return _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -418,7 +432,7 @@ class PdfService {
         sink,
       );
       await sink.close();
-      return outputFile;
+      return _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -463,7 +477,7 @@ class PdfService {
     try {
       await pdf.rotateAllPages(FileSource(sourceFile), sink, degrees: 90);
       await sink.close();
-      return outputFile;
+      return _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -491,7 +505,7 @@ class PdfService {
         ),
       );
       await sink.close();
-      return outputFile;
+      return _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -545,7 +559,7 @@ class PdfService {
         pages: zeroBasedPages,
       );
       await sink.close();
-      return outputFile;
+      return _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -569,7 +583,7 @@ class PdfService {
         order: zeroBasedOrder,
       );
       await sink.close();
-      return outputFile;
+      return _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -644,6 +658,7 @@ class PdfService {
     IOSink? writer;
     final preview = StringBuffer();
     var previewLength = 0;
+    var hasText = false;
     try {
       doc = await pdf.open(FileSource(source));
       writer = output.openWrite();
@@ -651,6 +666,7 @@ class PdfService {
         final text = await doc.extract(pages: PdfPages.single(i));
         writer.writeln('--- Page ${i + 1} ---');
         writer.writeln(text);
+        hasText = hasText || text.trim().isNotEmpty;
         await writer.flush();
         if (previewLength < 50000) {
           final remaining = 50000 - previewLength;
@@ -661,7 +677,7 @@ class PdfService {
       }
       await writer.close();
       writer = null;
-      return (output, preview.toString());
+      return (output, hasText ? preview.toString() : '');
     } catch (_) {
       try { await writer?.close(); } catch (_) {}
       writer = null;
@@ -692,7 +708,7 @@ class PdfService {
         opacity: 1,
       );
       await sink.close();
-      return outputFile;
+      return _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -796,7 +812,7 @@ class PdfService {
       await write(pdf, sink);
       await sink.close();
       sink = null;
-      return output;
+      return _commitOutput(output);
     } catch (_) {
       try { await sink?.close(); } catch (_) {}
       try { await output.delete(); } catch (_) {}
@@ -867,7 +883,7 @@ class PdfService {
           await sink.close();
         }
       }
-      return output;
+      return _commitOutput(output);
     } catch (_) {
       if (await output.exists()) await output.delete();
       rethrow;
@@ -906,6 +922,7 @@ class PdfService {
         await pdf.dispose();
       }
     }
+    for (var i = 0; i < outputs.length; i++) { outputs[i] = await _commitOutput(outputs[i]); }
     return outputs;
     } catch (_) {
       for (final output in outputs) {
@@ -994,6 +1011,7 @@ class PdfService {
           await sink.close();
         }
       }
+      for (var i = 0; i < files.length; i++) { files[i] = await _commitOutput(files[i]); }
       return files;
     } catch (_) {
       for (final file in files) {
@@ -1362,7 +1380,7 @@ class PdfService {
       if (!changed) {
         await source.copy(output.path);
         control?.check();
-        return output;
+        return _commitOutput(output);
       }
 
       control?.check();
@@ -1418,7 +1436,7 @@ class PdfService {
       }
 
       control?.check();
-      return output;
+      return _commitOutput(output);
     } catch (_) {
       // An extraction/encoding failure must not leave a misleading partial
       // "searchable" document in the user's library.
@@ -1579,7 +1597,7 @@ class PdfService {
         'token': token,
       });
       control?.check();
-      return output;
+      return _commitOutput(output);
     } catch (_) {
       if (await output.exists()) await output.delete();
       control?.check();
@@ -1607,7 +1625,7 @@ class PdfService {
       await sink.close();
       sink = null;
       _displayNames[output.path] = displayName(source);
-      return output;
+      return _commitOutput(output);
     } catch (_) {
       try { await sink?.close(); } catch (_) {}
       await secureDeleteTemporary(output);
@@ -1619,19 +1637,8 @@ class PdfService {
 
   Future<File> createScannedPdfFromFiles(List<String> paths) async {
     if (paths.isEmpty) throw ArgumentError('No scanned pages supplied.');
-    try {
-      return await imageFilesToPdf([for (final path in paths) File(path)], prefix: 'Scan');
-    } finally {
-      final temp = await _tmp();
-      for (final path in paths) {
-        try {
-          final file = File(path);
-          if (_isScanPageInTemp(file, temp) && await file.exists()) {
-            await ScanTempSession().deletePath(path);
-          }
-        } catch (_) {}
-      }
-    }
+    // Capture ownership stays with the draft until library registration commits.
+    return imageFilesToPdf([for (final path in paths) File(path)], prefix: 'Scan');
   }
 
   Future<T> _withLegacyStoragePermission<T>(

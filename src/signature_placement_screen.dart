@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
+import 'output_protection.dart';
 import 'lru_future_cache.dart';
 import 'signature_screen.dart';
 import 'signature_geometry.dart';
@@ -24,6 +25,7 @@ class SignaturePlacementScreen extends StatefulWidget {
 
 class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   File? _source;
+  bool _wasProtected = false;
   Uint8List? _signature;
   Uint8List? _placedSignature;
   double _signatureAspect = 2.25;
@@ -121,6 +123,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
         if (!mounted) return;
 
         _source = file;
+        _wasProtected = file.path != picked.path;
         _pageInfos = infos;
         _thumbs.clear();
         _preview = null;
@@ -193,9 +196,9 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   void _clampPlacement() {
     if (_pageInfos.isEmpty) return;
     final info = _pageInfos[_page];
-    final rect = _placement(info.width, info.height);
-    _x = rect.left / info.width;
-    _y = rect.top / info.height;
+    final rect = _placement(info.effectiveWidth, info.effectiveHeight);
+    _x = rect.left / info.effectiveWidth;
+    _y = rect.top / info.effectiveHeight;
   }
 
   Future<void> _drawSignature() async {
@@ -240,13 +243,22 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     });
 
     try {
-      final finalSignature = _placedSignature ?? signature;
+      if (_wasProtected) {
+        if (!await confirmUnprotectedOutput(context) || !mounted) return;
+      }
+      var finalSignature = _placedSignature ?? signature;
       final pageInfo = _pageInfos[_page];
-      final placement = _placement(pageInfo.width, pageInfo.height);
-      final xPt = placement.left;
-      final yPt = pageInfo.height - placement.bottom;
-      final widthPt = placement.width;
-      final heightPt = placement.height;
+      final placement = _placement(pageInfo.effectiveWidth, pageInfo.effectiveHeight);
+      final rect = signaturePdfRect(placement, pageInfo.width, pageInfo.height, pageInfo.rotation);
+      if (pageInfo.rotation != 0) {
+        final image = img.decodePng(finalSignature);
+        if (image == null) throw StateError('Invalid signature image.');
+        finalSignature = img.encodePng(img.copyRotate(image, angle: -pageInfo.rotation));
+      }
+      final xPt = rect.left;
+      final yPt = rect.top;
+      final widthPt = rect.width;
+      final heightPt = rect.height;
 
       final output = await widget.service.stampSignatureAt(
         source,
@@ -413,7 +425,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                       : LayoutBuilder(
                           builder: (context, constraints) {
                             final info = _pageInfos[_page];
-                            final aspect = info.width / info.height;
+                            final aspect = info.effectiveWidth / info.effectiveHeight;
                             var width = constraints.maxWidth;
                             var height = width / aspect;
                             if (height > constraints.maxHeight) {

@@ -19,3 +19,13 @@ Rect signaturePlacement({
     width, height,
   );
 }
+
+/// Map a displayed top-left rectangle to unrotated PDF bottom-left coordinates.
+Rect signaturePdfRect(Rect view, double width, double height, int rotation) {
+  switch (rotation % 360) {
+    case 90: return Rect.fromLTWH(view.top, view.left, view.height, view.width);
+    case 180: return Rect.fromLTWH(width - view.right, view.top, view.width, view.height);
+    case 270: return Rect.fromLTWH(width - view.bottom, height - view.right, view.height, view.width);
+    default: return Rect.fromLTWH(view.left, height - view.bottom, view.width, view.height);
+  }
+}

@@ -25,6 +25,7 @@ import 'live_scanner_screen.dart';
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
 import 'pdf_viewer.dart';
+import 'scan_draft_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -212,14 +213,17 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _favoritesOnly = false;
   bool _busy = false;
   BannerAd? _banner;
+  bool _externalAction = false;
 
   @override
   void initState() {
     super.initState();
     unawaited(_service.cleanupStaleTemporaryFiles());
-    _loadFiles();
+    _recoverFiles();
     _search.addListener(() => setState(() {}));
     AdsService.instance.adsAllowed.addListener(_refreshBanner);
+    AdsService.instance.appOpenAllowed = () => mounted && !_busy &&
+        ModalRoute.of(context)?.isCurrent == true && !_externalAction;
     _initializeAds();
   }
 
@@ -255,6 +259,19 @@ class _HomeScreenState extends State<HomeScreen> {
     AdsService.instance.releaseBanner(_banner);
     _search.dispose();
     super.dispose();
+  }
+
+  Future<void> _recoverFiles() async {
+    try {
+      final outputs = await _service.recoverableOutputs();
+      await _store.addMany([for (final file in outputs)
+        PdfRecord(path: file.path, name: file.uri.pathSegments.last,
+          createdAt: await file.lastModified())]);
+      await _loadFiles();
+      await _offerScanRecovery();
+    } catch (_) {
+      if (mounted) setState(() => _libraryError = 'Recovery failed. Restart to retry; your files are retained.');
+    }
   }
 
   Future<void> _loadFiles() async {
@@ -393,12 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
       name: file.uri.pathSegments.last,
       createdAt: DateTime.now(),
     );
-    try {
-      await _store.add(record);
-    } catch (_) {
-      try { await file.delete(); } catch (_) {}
-      rethrow;
-    }
+    await _store.add(record);
 
     if (!mounted) return;
     if (widget.autoSaveDownloads) {
@@ -440,44 +452,51 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  final _scanDrafts = ScanDraftStore();
+
+  Future<void> _offerScanRecovery() async {
+    final drafts = await _scanDrafts.recover();
+    for (final pages in drafts) {
+      if (!mounted) return;
+      final choice = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Recover unsaved scan'),
+        content: Text('${pages.length} captured pages are safe. Save them now?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, 'later'), child: const Text('Later')),
+          TextButton(onPressed: () => Navigator.pop(context, 'discard'), child: const Text('Discard')),
+          FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Save PDF')),
+        ],
+      ));
+      if (choice == 'discard') await _scanDrafts.discard(pages);
+      if (choice == 'save') await _saveScan(pages);
+    }
+  }
+
   Future<void> _scan() async {
-    final pagePaths = await Navigator.of(context).push<List<String>>(
+    final pages = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(builder: (_) => const LiveScannerScreen()),
     );
-    if (pagePaths == null || pagePaths.isEmpty) return;
+    if (pages != null && pages.isNotEmpty) await _saveScan(pages);
+  }
 
+  Future<void> _saveScan(List<String> pages) async {
+    if (!mounted || _busy) return;
+    setState(() => _busy = true);
     try {
-      if (!mounted) return;
-      setState(() => _busy = true);
-      final output = await _service.createScannedPdfFromFiles(pagePaths);
+      final output = await _scanDrafts.completedOutput(pages) ??
+          await _service.createScannedPdfFromFiles(pages);
+      await _scanDrafts.rememberOutput(pages, output);
       await _register(output);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Saved ${pagePaths.length}-page scan'),
-          action: SnackBarAction(
-            label: 'Open',
-            onPressed: () =>
-                _openPath(output.path, output.uri.pathSegments.last),
-          ),
-        ),
-      );
-      await AdsService.instance.recordCompletedOperation();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Scan failed: $e')));
-      }
-    } finally {
-      for (final path in pagePaths) {
-        try {
-          final file = File(path);
-          if (await file.exists()) await file.delete();
-        } catch (_) {}
-      }
-      if (mounted) setState(() => _busy = false);
-    }
+      await _scanDrafts.discard(pages);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved ${pages.length}-page scan')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Scan not saved: $error. Captured pages are retained.'),
+        duration: const Duration(seconds: 15),
+        action: SnackBarAction(label: 'Retry', onPressed: () => _saveScan(pages)),
+      ));
+    } finally { if (mounted) setState(() => _busy = false); }
   }
 
   Future<void> _imagesToPdf() =>
@@ -538,7 +557,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     setState(() => _busy = true);
-    var registered = false;
     try {
       await _store.addMany([
         for (final output in outputs)
@@ -548,7 +566,6 @@ class _HomeScreenState extends State<HomeScreen> {
             createdAt: DateTime.now(),
           ),
       ]);
-      registered = true;
       await _loadFiles();
       if (widget.autoSaveDownloads) {
         for (final output in outputs) {
@@ -565,11 +582,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       await AdsService.instance.recordCompletedOperation();
     } catch (error) {
-      if (!registered) {
-        for (final output in outputs) {
-          try { await output.delete(); } catch (_) {}
-        }
-      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Split registration failed: $error')),
@@ -684,9 +696,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _share(PdfRecord record) async {
-    await SharePlus.instance.share(
-      ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'),
-    );
+    if (_externalAction) return;
+    _externalAction = true;
+    try {
+      await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error')));
+    } finally { _externalAction = false; }
   }
 
   Future<void> _export(PdfRecord record) async {

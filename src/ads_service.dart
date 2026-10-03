@@ -84,6 +84,8 @@ class AdsService {
   bool _isShowingFullScreenAd = false;
   DateTime? _lastFullScreenAdAt;
 
+  bool Function()? appOpenAllowed;
+
   bool get canRequestAds => _canRequestAds;
   bool get privacyOptionsRequired => _privacyOptionsRequired;
   bool get rewardedAvailable => _rewarded != null;
@@ -503,7 +505,7 @@ class AdsService {
 
   Future<void> showAppOpenIfEligible() async {
     // Google recommends waiting until users have used the app a few times.
-    if (!_appOpenEnabled ||
+    if (appOpenAllowed?.call() != true || !_appOpenEnabled ||
         !_canRequestAds ||
         _sessionCount < 3 ||
         _isShowingFullScreenAd ||
@@ -512,7 +514,7 @@ class AdsService {
     }
 
     final prefs = await SharedPreferences.getInstance();
-    if (!_appOpenEnabled ||
+    if (appOpenAllowed?.call() != true || !_appOpenEnabled ||
         !_canRequestAds ||
         _isShowingFullScreenAd ||
         recentlyShowedFullScreenAd) {
