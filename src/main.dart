@@ -24,6 +24,7 @@ import 'file_store.dart';
 import 'live_scanner_screen.dart';
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
+import 'pdf_password_dialog.dart';
 import 'pdf_viewer.dart';
 import 'scan_draft_store.dart';
 
@@ -639,19 +640,8 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final result = await _service.extractPdfTextToFile(requestPassword: (wrong) async {
         if (!mounted) return null;
-        final controller = TextEditingController();
-        try {
-          return await showDialog<String>(context: context, barrierDismissible: false,
-            builder: (context) => AlertDialog(
-              title: Text(wrong ? 'Wrong password. Try again' : 'PDF password'),
-              content: TextField(controller: controller, obscureText: true,
-                autofocus: true, decoration: const InputDecoration(labelText: 'Password')),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Open')),
-              ],
-            ));
-        } finally { controller.dispose(); }
+        return askPdfPassword(context,
+          title: wrong ? 'Wrong password. Try again' : 'PDF password');
       });
       if (result == null) return;
       textFile = result.$1;

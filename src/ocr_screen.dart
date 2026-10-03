@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'ads_service.dart';
 import 'pdf_service.dart';
+import 'pdf_password_dialog.dart';
 import 'pdf_rules.dart';
 import 'ocr_languages.dart';
 import 'ocr_page_preview_screen.dart';
@@ -46,37 +47,10 @@ class _OcrScreenState extends State<OcrScreen> {
     TextRecognitionScript.korean => 'Korean',
   };
 
-  Future<String?> _askPassword({bool owner = false, bool wrong = false}) async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(owner ? (wrong ? 'Wrong owner password. Try again' : 'Owner password required') : 'PDF password'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: InputDecoration(
-            labelText: owner ? 'Owner password' : 'Password',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Open'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return value;
-  }
+  Future<String?> _askPassword({bool owner = false, bool wrong = false}) =>
+      askPdfPassword(context,
+        title: owner ? (wrong ? 'Wrong owner password. Try again' : 'Owner password required') : 'PDF password',
+        label: owner ? 'Owner password' : 'Password');
 
   Future<void> _pick() async {
     if (_busy) return;
