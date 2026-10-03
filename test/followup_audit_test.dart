@@ -216,21 +216,25 @@ void main() {
       await tester.tap(find.text('Launch')); await tester.pumpAndSettle();
       await tester.tap(find.text('Choose')); await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Make searchable'));
-      await tester.tap(find.text('Make searchable')); await tester.pumpAndSettle();
+      await tester.tap(find.text('Make searchable')); await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('Owner password required'), findsOneWidget);
       expect(service.writes, 0);
       if (cancel) {
         await tester.enterText(find.byType(TextField), 'bad');
-        await tester.tap(find.text('Open')); await tester.pumpAndSettle();
-        await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+        await tester.tap(find.text('Open')); await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel').last); await tester.pumpAndSettle();
         expect(service.writes, 0);
         await tester.ensureVisible(find.text('Make searchable'));
-        await tester.tap(find.text('Make searchable')); await tester.pumpAndSettle();
+        await tester.tap(find.text('Make searchable')); await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
         expect(service.passwords, [null, 'bad', null]);
-        await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel').last); await tester.pumpAndSettle();
       } else {
         await tester.enterText(find.byType(TextField), 'bad');
-        await tester.tap(find.text('Open')); await tester.pumpAndSettle();
+        await tester.tap(find.text('Open')); await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
         expect(find.text('Wrong owner password. Try again'), findsOneWidget);
         expect(service.writes, 0);
         await tester.enterText(find.byType(TextField), 'owner-secret');

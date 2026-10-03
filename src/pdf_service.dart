@@ -684,13 +684,17 @@ class PdfService {
         try {
           doc = await pdf.open(FileSource(source), password: password);
           break;
-        } on PdfPasswordRequired {
+        } catch (error) {
           if (requestPassword == null) rethrow;
-          password = await requestPassword(false);
-          if (password == null) { await secureDeleteTemporary(output); return null; }
-        } on PdfWrongPassword {
-          if (requestPassword == null) rethrow;
-          password = await requestPassword(true);
+          // Some native bridge operations report engine errors instead of the
+          // typed authentication exceptions used by the public Dart API.
+          final message = error.toString().toLowerCase();
+          final required = error is PdfPasswordRequired || message.contains('password required');
+          final wrong = error is PdfWrongPassword ||
+            message.contains('wrong password') || message.contains('incorrect password') ||
+            message.contains('invalid password');
+          if (!required && !wrong) rethrow;
+          password = await requestPassword(wrong);
           if (password == null) { await secureDeleteTemporary(output); return null; }
         }
       }
