@@ -108,12 +108,13 @@ void main() {
         await tester.tap(find.widgetWithText(CheckboxListTile, '1'));
       }
       final save = find.text(organizer ? 'Save' : 'Split PDF');
-      await tester.ensureVisible(save); await tester.tap(save); await tester.pumpAndSettle();
+      await tester.ensureVisible(save); await tester.tap(save);
+      await tester.pump(); await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Create an unprotected copy?'), findsOneWidget);
       expect(service.writes, 0);
       await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
       expect(service.writes, 0);
-      await tester.tap(save); await tester.pumpAndSettle();
+      await tester.tap(save); await tester.pump(); await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('Create unprotected copy')); await tester.pumpAndSettle();
       expect(service.writes, 1);
       expect(tester.takeException(), isNull);

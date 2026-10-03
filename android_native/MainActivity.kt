@@ -12,6 +12,7 @@ import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
@@ -201,6 +202,12 @@ class MainActivity : FlutterActivity() {
                             require(textWidth > 0) { "Font cannot encode OCR text" }
                             val angle = -word.optDouble("angle", 0.0) * PI / 180.0
                             require(x.isFinite() && baseline.isFinite() && angle.isFinite()) { "Invalid OCR coordinates" }
+                            // Preserve one logical word even when a Unicode-plane
+                            // change requires several font runs. Readers must not
+                            // reorder those runs as independent layout regions.
+                            val semantics = COSDictionary()
+                            semantics.setString(COSName.getPDFName("ActualText"), text)
+                            stream.beginMarkedContent(COSName.getPDFName("Span"), PDPropertyList.create(semantics))
                             stream.beginText()
                             stream.setRenderingMode(RenderingMode.NEITHER)
                             stream.setHorizontalScaling(width / textWidth * 100f)
@@ -211,6 +218,7 @@ class MainActivity : FlutterActivity() {
                                 stream.showText(value)
                             }
                             stream.endText()
+                            stream.endMarkedContent()
                         }
                     }
                     changed.add(page.cosObject)
