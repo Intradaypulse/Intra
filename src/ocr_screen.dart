@@ -397,9 +397,11 @@ class _OcrScreenState extends State<OcrScreen> {
       },
     );
     try {
+      var candidatePassword = _password;
       while (true) {
         try {
-          await widget.service.checkOcrPermission(source, password: _password);
+          await widget.service.checkOcrPermission(source, password: candidatePassword);
+          _password = candidatePassword;
           break;
         } on PlatformException catch (error) {
           if (error.code != 'OCR_OWNER_PASSWORD_REQUIRED' && error.code != 'OCR_WRONG_PASSWORD') rethrow;
@@ -409,7 +411,7 @@ class _OcrScreenState extends State<OcrScreen> {
             if (mounted) setState(() => _status = 'Cancelled.');
             return;
           }
-          _password = password;
+          candidatePassword = password;
         }
       }
       if (!mounted) return;

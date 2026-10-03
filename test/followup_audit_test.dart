@@ -220,8 +220,14 @@ void main() {
       expect(find.text('Owner password required'), findsOneWidget);
       expect(service.writes, 0);
       if (cancel) {
+        await tester.enterText(find.byType(TextField), 'bad');
+        await tester.tap(find.text('Open')); await tester.pumpAndSettle();
         await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
         expect(service.writes, 0);
+        await tester.ensureVisible(find.text('Make searchable'));
+        await tester.tap(find.text('Make searchable')); await tester.pumpAndSettle();
+        expect(service.passwords, [null, 'bad', null]);
+        await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
       } else {
         await tester.enterText(find.byType(TextField), 'bad');
         await tester.tap(find.text('Open')); await tester.pumpAndSettle();
