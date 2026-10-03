@@ -662,8 +662,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 try {
                   await SharePlus.instance.share(ShareParams(files: [XFile(textFile!.path)]));
                 } catch (error) {
-                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Sharing failed. Please retry: $error')));
+                  if (context.mounted) { ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
                 }
               },
               icon: const Icon(Icons.share_outlined),
@@ -704,7 +704,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'));
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
     } finally { _externalAction = false; }
   }
 

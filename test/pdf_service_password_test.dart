@@ -10,7 +10,6 @@ import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/pdf_service.dart';
 import 'package:pdfmate/signature_geometry.dart';
 import 'package:pdf/pdf.dart' as format;
-import 'dart:ui' show Rect;
 
 final class _PickedFile extends PlatformFile {
   _PickedFile(this.path);
@@ -448,6 +447,20 @@ void main() {
     } finally { await sink.close(); await editor.dispose(); await engine.dispose(); }
     final box = await service.pageVisibleBox(changed, 0);
     expect([box.x, box.y, box.width, box.height], [50, 70, 400, 500]);
+  });
+
+  test('reserved scan destination publishes atomically and cannot overwrite completion', () async {
+    final page = File('${temp.path}/reserved.png');
+    await page.writeAsBytes(img.encodePng(img.Image(width: 24, height: 48)));
+    final destination = File('${docs.path}/Scan_session.pdf');
+    final output = await service.createScannedPdfFromFiles([page.path], destination: destination);
+    expect(output.path, destination.path);
+    expect(await service.pageCount(output), 1);
+    expect(await File('${destination.path}.pending').exists(), isFalse);
+    final bytes = await output.readAsBytes();
+    await expectLater(service.createScannedPdfFromFiles([page.path], destination: destination), throwsStateError);
+    expect(await output.readAsBytes(), bytes);
+    expect(await temp.list().where((f) => f.path != page.path).toList(), isEmpty);
   });
 
   test('scanner page files are retained until library registration', () async {

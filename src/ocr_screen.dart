@@ -581,8 +581,8 @@ class _OcrScreenState extends State<OcrScreen> {
                           try {
                             await SharePlus.instance.share(ShareParams(files: [XFile(_textFile!.path)]));
                           } catch (error) {
-                            if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Sharing failed. Please retry: $error')));
+                            if (context.mounted) { ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
                           }
                         },
                       ),

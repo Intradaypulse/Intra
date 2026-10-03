@@ -1,7 +1,7 @@
-# Invisible OCR font
+# Invisible OCR fonts
 
-NotoSansDevanagariOCR.ttf is an OFL-licensed Noto Sans Devanagari derivative used only for invisible searchable text, not for rendering visible Hindi glyphs. See OFL.txt.
+All searchable OCR uses PDFBox text rendering mode 3 (NEITHER). These fonts must never be used for visible text.
 
-Source: google/fonts, ofl/notosansdevanagari/NotoSansDevanagari[wdth,wght].ttf, downloaded 2026-09-29. Instantiate weight 400 / width 100 with fontTools; remove GSUB because the invisible PDF layer must preserve logical Unicode order. Subset U+0020–024F, U+0900–097F, U+1CD0–1CFF, U+2000–206F, U+20A0–20CF, U+A8E0–A8FF. This includes rupee signs, smart punctuation, Latin accents and Devanagari. Unsupported scripts fail output verification instead of silently returning corrupted text.
+`scripts/build_ocr_fonts.py` builds four original PDFMate OCR identity fonts with fonttools 4.61.1 during Android project setup. Each Unicode scalar in planes 0–3 (except controls, surrogates and terminal noncharacters) has a unique glyph ID. Simple original outlines and fixed metrics are fitted to the recognized word bounds; embedded ToUnicode mappings retain logical text. No third-party glyph outlines are used. Fonts load lazily per document/plane and are shared across pages. Source and timestamps are deterministic. Coverage includes Latin, Devanagari, CJK and supplementary ideographs.
 
-Upstream source SHA-256: `14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e`.
+The older NotoSansDevanagariOCR.ttf is retained as a licensed fixture; the new writer does not use it. See OFL.txt. Source: google/fonts, ofl/notosansdevanagari/NotoSansDevanagari[wdth,wght].ttf, downloaded 2026-09-29, instantiated at weight 400 / width 100 with GSUB removed. Upstream SHA-256: 14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e.

@@ -75,8 +75,9 @@ void registerDeepAuditCases() {
     try {
       final pdf = pw.Document();
       pdf.addPage(pw.Page(pageFormat: const pf.PdfPageFormat(600, 800), margin: pw.EdgeInsets.zero,
-        build: (_) => pw.Stack(children: [pw.Positioned(left: 150, top: 200, width: 300, height: 150,
-          child: pw.Image(pw.MemoryImage(base64Decode(hindiScanBase64))))])));
+        build: (_) => pw.Stack(children: [pw.Positioned(left: 150, top: 200,
+          child: pw.SizedBox(width: 300, height: 150,
+            child: pw.Image(pw.MemoryImage(base64Decode(hindiScanBase64)))))])));
       final raw = await File('${docs.path}/raw.pdf').writeAsBytes(await pdf.save());
       editor = await engine.edit(FileSource(raw));
       await editor.setPageCropBox(0, const PdfRect(x: 100, y: 350, width: 400, height: 300));

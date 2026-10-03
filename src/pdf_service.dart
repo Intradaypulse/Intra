@@ -23,7 +23,6 @@ import 'ocr_languages.dart';
 import 'scan_temp_session.dart';
 import 'serial_executor.dart';
 import 'signature_geometry.dart';
-import 'dart:ui' show Rect;
 
 Future<Uint8List> _encodeImagePdfPage(String path) async {
   final bytes = await File(path).readAsBytes();
