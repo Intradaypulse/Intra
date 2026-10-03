@@ -21,7 +21,7 @@ class PreviewService extends PdfService {
 void main() {
   testWidgets('copies text selected directly on the page image', (tester) async {
     final semantics = tester.ensureSemantics();
-    addTearDown(semantics.dispose);
+    try {
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String;
@@ -35,5 +35,6 @@ void main() {
     await tester.tap(find.text('Copy selected'));
     await tester.pumpAndSettle();
     expect(copied, 'Hello preview');
+    } finally { semantics.dispose(); }
   });
 }
