@@ -41,7 +41,7 @@ void registerDeepAuditCases() {
           'password': 'owner-secret',
         });
         result = await engine.open(FileSource(output), password: 'owner-secret');
-        expect(await result.extract(), contains('Authorized'));
+        expect(await result.extract(pages: PdfPages.single(0)), contains('Authorized'));
       } finally {
         await result?.dispose(); await engine.dispose(); await root.delete(recursive: true);
       }

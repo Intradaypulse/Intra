@@ -190,7 +190,8 @@ class PdfService {
     await for (final entity in dir.list(followLinks: false)) {
       if (entity is! File) continue;
       if (isPdfMateManagedTempPath(entity.path) &&
-          !_activeTemporaryPaths.contains(entity.path)) {
+          !_activeTemporaryPaths.contains(entity.path) &&
+          !_pendingOutputs.contains(entity.path)) {
         _managedTemporaryPaths.add(entity.path);
         await secureDeleteTemporary(entity);
       } else if (_isScanPageInTemp(entity, dir)) {
@@ -836,7 +837,7 @@ class PdfService {
       return CompressionResult(file: output, originalBytes: originalBytes,
         outputBytes: await output.length());
     } catch (_) {
-      try { await output?.delete(); } catch (_) {}
+      await secureDeleteTemporary(output);
       rethrow;
     } finally {
       await secureDeleteTemporary(decryptedTemp);

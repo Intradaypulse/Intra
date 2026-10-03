@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -152,6 +151,20 @@ void main() {
     expect(await temp.list().toList(), isEmpty);
   });
 
+  test('failed compression publication retains preview for retry', () async {
+    final source = await fixture();
+    final service = PdfService(documentsDirectoryProvider: () async => docs,
+      temporaryDirectoryProvider: () async => temp);
+    final result = await service.compressAdvanced(source, CompressionPreset.balanced);
+    await docs.delete(recursive: true); // Destination unavailable during Save.
+    await expectLater(service.publishCompressionPreview(result.file), throwsA(isA<FileSystemException>()));
+    expect(await result.file.exists(), isTrue);
+    await docs.create();
+    final saved = await service.publishCompressionPreview(result.file);
+    expect(await service.pageCount(saved), 1);
+    expect(await result.file.exists(), isFalse);
+  });
+
   test('extract protected text retries wrong password without re-picking', () async {
     final source = await fixture();
     final base = PdfService(documentsDirectoryProvider: () async => docs,
@@ -223,4 +236,3 @@ void main() {
     });
   }
 }
-

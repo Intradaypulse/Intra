@@ -320,8 +320,10 @@ class _CompressionScreenState extends State<CompressionScreen> {
       _outputHandedOff = true;
       if (mounted) Navigator.of(context).pop<File>(output);
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save PDF. Please retry: $error')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save PDF. Please retry: $error')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
