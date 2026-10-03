@@ -355,6 +355,7 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER"
           for apk in release-apks/*.apk; do
+            python3 scripts/verify_work_database.py "$apk"
             "$APKSIGNER" verify --verbose --print-certs "$apk"
           done
 

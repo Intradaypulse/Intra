@@ -709,6 +709,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _export(PdfRecord record) async {
+    if (_externalAction) return;
+    _externalAction = true;
     try {
       final uri = await _service.exportPdf(File(record.path), record.name);
       if (!mounted || uri == null) return;
@@ -721,7 +723,7 @@ class _HomeScreenState extends State<HomeScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
-    }
+    } finally { _externalAction = false; }
   }
 
   Future<void> _rename(PdfRecord record) async {

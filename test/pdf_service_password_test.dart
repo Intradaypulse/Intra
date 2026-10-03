@@ -8,6 +8,9 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/pdf_service.dart';
+import 'package:pdfmate/signature_geometry.dart';
+import 'package:pdf/pdf.dart' as format;
+import 'dart:ui' show Rect;
 
 final class _PickedFile extends PlatformFile {
   _PickedFile(this.path);
@@ -382,6 +385,41 @@ void main() {
       await reader.dispose();
     }
   });
+
+  for (final rotation in [0, 90, 180, 270]) {
+    test('signature render matches cropped preview at rotation $rotation', () async {
+      final document = pw.Document()..addPage(pw.Page(
+        pageFormat: const format.PdfPageFormat(400, 600), build: (_) => pw.SizedBox()));
+      final source = await File('${docs.path}/blank.pdf').writeAsBytes(await document.save());
+      final engine = Pdf();
+      final editor = await engine.edit(FileSource(source));
+      final cropped = File('${docs.path}/crop_$rotation.pdf');
+      final sink = await FileSink.create(cropped);
+      try {
+        await editor.setPageCropBox(0, const PdfRect(x: 20, y: 30, width: 200, height: 300));
+        await editor.setPageRotation(0, degrees: rotation);
+        await editor.save(sink);
+      } finally { await sink.close(); await editor.dispose(); await engine.dispose(); }
+      final box = await service.pageVisibleBox(cropped, 0);
+      final rect = signaturePdfRect(const Rect.fromLTWH(10, 20, 80, 30), box.width, box.height, rotation);
+      final signature = img.Image(width: 80, height: 30, numChannels: 4);
+      img.fill(signature, color: img.ColorRgba8(255, 0, 0, 255));
+      final png = img.encodePng(img.copyRotate(signature, angle: -rotation));
+      final signed = await service.stampSignatureAt(cropped, png, page: 0,
+        rect: PdfRect(x: rect.left + box.x, y: rect.top + box.y, width: rect.width, height: rect.height));
+      final rendered = img.decodeImage((await service.renderPage(signed, 0, width: 600))!)!;
+      final red = [for (final pixel in rendered)
+        if (pixel.r > 200 && pixel.g < 60 && pixel.b < 60) (pixel.x, pixel.y)];
+      expect(red, isNotEmpty);
+      final xs = red.map((p) => p.$1).toList()..sort();
+      final ys = red.map((p) => p.$2).toList()..sort();
+      final scale = rendered.width / (rotation % 180 == 0 ? box.width : box.height);
+      expect(xs.first, closeTo(10 * scale, 3));
+      expect(ys.first, closeTo(20 * scale, 3));
+      expect(xs.last + 1, closeTo(90 * scale, 3));
+      expect(ys.last + 1, closeTo(50 * scale, 3));
+    });
+  }
 
   test('failed scan encoding retains captures for retry', () async {
     final page = await File('${temp.path}/pdfmate_scan_broken.jpg').writeAsString('invalid image');
