@@ -36,6 +36,12 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   List<PdfPageInfo> _pageInfos = [];
   Uint8List? _preview;
   int _page = 0;
+  PdfRect? _pageBox;
+  double get _pageWidth => _pageBox?.width ?? _pageInfos[_page].width;
+  double get _pageHeight => _pageBox?.height ?? _pageInfos[_page].height;
+  bool get _sideways => _pageInfos[_page].rotation % 180 != 0;
+  double get _viewWidth => _sideways ? _pageHeight : _pageWidth;
+  double get _viewHeight => _sideways ? _pageWidth : _pageHeight;
 
   double _x = 0.54;
   double _y = 0.72;
@@ -123,7 +129,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
         if (!mounted) return;
 
         _source = file;
-        _wasProtected = file.path != picked.path;
+        _wasProtected = file.path != picked.path || widget.service.wasProtected(file);
         _pageInfos = infos;
         _thumbs.clear();
         _preview = null;
@@ -169,6 +175,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     final source = _source;
     if (source == null) return;
     try {
+      _pageBox = await widget.service.pageVisibleBox(source, _page);
       final preview = await widget.service.renderPage(source, _page, width: 1400);
       if (preview == null) throw StateError('Page renderer returned no image.');
       if (mounted) setState(() { _preview = preview; _previewError = null; });
@@ -195,10 +202,9 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
 
   void _clampPlacement() {
     if (_pageInfos.isEmpty) return;
-    final info = _pageInfos[_page];
-    final rect = _placement(info.effectiveWidth, info.effectiveHeight);
-    _x = rect.left / info.effectiveWidth;
-    _y = rect.top / info.effectiveHeight;
+    final rect = _placement(_viewWidth, _viewHeight);
+    _x = rect.left / _viewWidth;
+    _y = rect.top / _viewHeight;
   }
 
   Future<void> _drawSignature() async {
@@ -248,15 +254,15 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
       }
       var finalSignature = _placedSignature ?? signature;
       final pageInfo = _pageInfos[_page];
-      final placement = _placement(pageInfo.effectiveWidth, pageInfo.effectiveHeight);
-      final rect = signaturePdfRect(placement, pageInfo.width, pageInfo.height, pageInfo.rotation);
+      final placement = _placement(_viewWidth, _viewHeight);
+      final rect = signaturePdfRect(placement, _pageWidth, _pageHeight, pageInfo.rotation);
       if (pageInfo.rotation != 0) {
         final image = img.decodePng(finalSignature);
         if (image == null) throw StateError('Invalid signature image.');
         finalSignature = img.encodePng(img.copyRotate(image, angle: -pageInfo.rotation));
       }
-      final xPt = rect.left;
-      final yPt = rect.top;
+      final xPt = rect.left + (_pageBox?.x ?? 0);
+      final yPt = rect.top + (_pageBox?.y ?? 0);
       final widthPt = rect.width;
       final heightPt = rect.height;
 
@@ -424,8 +430,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                             : const Icon(Icons.draw_outlined, size: 88)
                       : LayoutBuilder(
                           builder: (context, constraints) {
-                            final info = _pageInfos[_page];
-                            final aspect = info.effectiveWidth / info.effectiveHeight;
+                            final aspect = _viewWidth / _viewHeight;
                             var width = constraints.maxWidth;
                             var height = width / aspect;
                             if (height > constraints.maxHeight) {

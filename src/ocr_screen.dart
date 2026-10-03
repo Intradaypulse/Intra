@@ -577,9 +577,14 @@ class _OcrScreenState extends State<OcrScreen> {
                       IconButton(
                         tooltip: 'Share full text file',
                         icon: const Icon(Icons.share_outlined),
-                        onPressed: () => SharePlus.instance.share(
-                          ShareParams(files: [XFile(_textFile!.path)]),
-                        ),
+                        onPressed: () async {
+                          try {
+                            await SharePlus.instance.share(ShareParams(files: [XFile(_textFile!.path)]));
+                          } catch (error) {
+                            if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Sharing failed. Please retry: $error')));
+                          }
+                        },
                       ),
                   ],
                 ),

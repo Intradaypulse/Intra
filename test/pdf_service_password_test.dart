@@ -383,6 +383,35 @@ void main() {
     }
   });
 
+  test('failed scan encoding retains captures for retry', () async {
+    final page = await File('${temp.path}/pdfmate_scan_broken.jpg').writeAsString('invalid image');
+    await expectLater(service.createScannedPdfFromFiles([page.path]), throwsA(anything));
+    expect(await page.readAsString(), 'invalid image');
+    expect(await service.recoverableOutputs(), isEmpty);
+  });
+
+  test('owner-only encryption is remembered for explicit output consent', () async {
+    final original = await createThreePagePdf();
+    final encrypted = await service.protectPdfAdvanced(original, ownerPassword: 'owner-only');
+    await service.pageCount(encrypted);
+    expect(service.wasProtected(encrypted), isTrue);
+  });
+
+  test('visible page geometry intersects crop and media boxes', () async {
+    final source = await createThreePagePdf();
+    final engine = Pdf();
+    final editor = await engine.edit(FileSource(source));
+    final changed = File('${docs.path}/cropped.pdf');
+    final sink = await FileSink.create(changed);
+    try {
+      await editor.setPageMediaBox(0, const PdfRect(x: 20, y: 30, width: 600, height: 800));
+      await editor.setPageCropBox(0, const PdfRect(x: 50, y: 70, width: 400, height: 500));
+      await editor.save(sink);
+    } finally { await sink.close(); await editor.dispose(); await engine.dispose(); }
+    final box = await service.pageVisibleBox(changed, 0);
+    expect([box.x, box.y, box.width, box.height], [50, 70, 400, 500]);
+  });
+
   test('scanner page files are retained until library registration', () async {
     final page = File('${temp.path}/pdfmate_scan_fixture.png');
     await page.writeAsBytes(img.encodePng(img.Image(width: 24, height: 48)));

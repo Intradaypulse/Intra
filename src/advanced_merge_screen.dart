@@ -123,7 +123,7 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
         final size = await file.length();
         if (!mounted) return;
         setState(() => _items.add(_MergeItem(
-          file: file, name: name, size: size, thumb: thumb, wasProtected: file.path != picked.path,
+          file: file, name: name, size: size, thumb: thumb, wasProtected: file.path != picked.path || widget.service.wasProtected(file),
         )));
         pending.remove(file);
       }

@@ -132,7 +132,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
     final source = _source;
     if (source == null || _busy) return;
 
-    if (_password != null && _password!.isNotEmpty) {
+    if (widget.service.wasProtected(source) || (_password != null && _password!.isNotEmpty)) {
       setState(() => _busy = true);
       final allowed = await confirmUnprotectedOutput(context);
       if (!mounted) return;

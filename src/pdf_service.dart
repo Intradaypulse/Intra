@@ -122,6 +122,9 @@ class PdfService {
 
   String displayName(File file) => _displayNames[file.path] ?? file.uri.pathSegments.last;
 
+  final Set<String> _protectedInputPaths = {};
+  bool wasProtected(File file) => _protectedInputPaths.contains(file.path);
+
   final Set<String> _managedTemporaryPaths = <String>{};
   static final Set<String> _activeTemporaryPaths = <String>{};
 
@@ -150,6 +153,7 @@ class PdfService {
   Future<void> secureDeleteTemporary(File? file) async {
     if (file == null || !isManagedTemporaryFile(file)) return;
     _displayNames.remove(file.path);
+    _protectedInputPaths.remove(file.path);
     _managedTemporaryPaths.remove(file.path);
     _activeTemporaryPaths.remove(file.path);
     try {
@@ -208,21 +212,32 @@ class PdfService {
   String _safe(String value) =>
       value.replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_');
 
+  static final Set<String> _pendingOutputs = {};
+
   Future<File> _newFile(String prefix) async {
     final dir = await _docs();
     final stamp = DateTime.now().microsecondsSinceEpoch;
-    return File('${dir.path}/${_safe(prefix)}_$stamp.pdf.pending');
+    final file = File('${dir.path}/${_safe(prefix)}_$stamp.pdf.pending');
+    _pendingOutputs.add(file.path);
+    return file;
   }
 
   Future<File> _commitOutput(File file) async {
     if (!file.path.endsWith('.pdf.pending')) return file;
-    return file.rename(file.path.substring(0, file.path.length - '.pending'.length));
+    final published = await file.rename(file.path.substring(0, file.path.length - '.pending'.length));
+    _pendingOutputs.remove(file.path);
+    return published;
   }
 
   /// Only complete, atomically published PDFs are candidates for recovery.
   Future<List<File>> recoverableOutputs() async {
     final dir = await _docs();
     if (!await dir.exists()) return [];
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is File && entity.path.endsWith('.pdf.pending') && !_pendingOutputs.contains(entity.path)) {
+        await ScanTempSession().deletePath(entity.path);
+      }
+    }
     return [await for (final entity in dir.list(followLinks: false))
       if (entity is File && entity.path.endsWith('.pdf') &&
           !entity.uri.pathSegments.last.startsWith('pdfmate_secure_tmp_')) entity];
@@ -264,7 +279,7 @@ class PdfService {
     }
     final output = await _newFile(prefix);
     await source.copy(output.path);
-    return _commitOutput(output);
+    return await _commitOutput(output);
   }
 
   Future<String?> exportPdf(File source, String fileName) async {
@@ -400,7 +415,7 @@ class PdfService {
         images: PdfImagePolicy.ebook,
       );
       await sink.close();
-      return _commitOutput(outputFile);
+      return await _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -432,7 +447,7 @@ class PdfService {
         sink,
       );
       await sink.close();
-      return _commitOutput(outputFile);
+      return await _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -460,7 +475,7 @@ class PdfService {
         await file.writeAsBytes(sinks[i].takeBytes(), flush: true);
         outputs.add(file);
       }
-      return outputs;
+      return await Future.wait(outputs.map(_commitOutput));
     } finally {
       await pdf.dispose();
       await secureDeleteTemporary(sourceFile);
@@ -477,7 +492,7 @@ class PdfService {
     try {
       await pdf.rotateAllPages(FileSource(sourceFile), sink, degrees: 90);
       await sink.close();
-      return _commitOutput(outputFile);
+      return await _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -505,7 +520,7 @@ class PdfService {
         ),
       );
       await sink.close();
-      return _commitOutput(outputFile);
+      return await _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -559,7 +574,7 @@ class PdfService {
         pages: zeroBasedPages,
       );
       await sink.close();
-      return _commitOutput(outputFile);
+      return await _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -583,7 +598,7 @@ class PdfService {
         order: zeroBasedOrder,
       );
       await sink.close();
-      return _commitOutput(outputFile);
+      return await _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -618,7 +633,7 @@ class PdfService {
         await file.writeAsBytes(jpgBytes, flush: true);
         pageNo++;
       }
-      return outputs;
+      return await Future.wait(outputs.map(_commitOutput));
     } catch (_) {
       for (final output in outputs) {
         try {
@@ -708,7 +723,7 @@ class PdfService {
         opacity: 1,
       );
       await sink.close();
-      return _commitOutput(outputFile);
+      return await _commitOutput(outputFile);
     } catch (_) {
       await sink.close();
       rethrow;
@@ -731,7 +746,7 @@ class PdfService {
       for (final item in picked) {
         files.add(await _materialize(item));
       }
-      return files;
+      return await Future.wait(files.map(_commitOutput));
     } catch (_) {
       for (final file in files) { await secureDeleteTemporary(file); }
       rethrow;
@@ -743,6 +758,7 @@ class PdfService {
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
       return doc.pageCount;
     } finally {
       await doc?.dispose();
@@ -760,6 +776,7 @@ class PdfService {
     final result = <Uint8List>[];
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
       await for (final page in doc.render(
         pages: const PdfPages.all(),
         size: PdfRenderSize.thumbnail(width),
@@ -812,7 +829,7 @@ class PdfService {
       await write(pdf, sink);
       await sink.close();
       sink = null;
-      return _commitOutput(output);
+      return await _commitOutput(output);
     } catch (_) {
       try { await sink?.close(); } catch (_) {}
       try { await output.delete(); } catch (_) {}
@@ -883,7 +900,7 @@ class PdfService {
           await sink.close();
         }
       }
-      return _commitOutput(output);
+      return await _commitOutput(output);
     } catch (_) {
       if (await output.exists()) await output.delete();
       rethrow;
@@ -923,7 +940,7 @@ class PdfService {
       }
     }
     for (var i = 0; i < outputs.length; i++) { outputs[i] = await _commitOutput(outputs[i]); }
-    return outputs;
+    return await Future.wait(outputs.map(_commitOutput));
     } catch (_) {
       for (final output in outputs) {
         try {
@@ -970,11 +987,27 @@ class PdfService {
     PdfOperationControl? control,
   }) => renderPage(source, 0, password: password, width: width, control: control);
 
+  Future<PdfRect> pageVisibleBox(File source, int page) async {
+    final pdf = Pdf();
+    PdfEditor? editor;
+    try {
+      editor = await pdf.edit(FileSource(source));
+      final media = await editor.pageMediaBox(page);
+      final crop = await editor.pageCropBox(page);
+      if (crop == null) return media;
+      final x = math.max(media.x, crop.x), y = math.max(media.y, crop.y);
+      final right = math.min(media.x + media.width, crop.x + crop.width);
+      final top = math.min(media.y + media.height, crop.y + crop.height);
+      return right > x && top > y ? PdfRect(x: x, y: y, width: right - x, height: top - y) : media;
+    } finally { await editor?.dispose(); await pdf.dispose(); }
+  }
+
   Future<List<PdfPageInfo>> pageInfos(File source, {String? password}) async {
     final pdf = Pdf();
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
       return List<PdfPageInfo>.from(doc.pages);
     } finally {
       await doc?.dispose();
@@ -1012,7 +1045,7 @@ class PdfService {
         }
       }
       for (var i = 0; i < files.length; i++) { files[i] = await _commitOutput(files[i]); }
-      return files;
+      return await Future.wait(files.map(_commitOutput));
     } catch (_) {
       for (final file in files) {
         if (await file.exists()) await file.delete();
@@ -1038,6 +1071,7 @@ class PdfService {
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
       control?.check();
       await for (final page in doc.render(
         pages: PdfPages.single(pageIndex),
@@ -1098,6 +1132,7 @@ class PdfService {
       PdfDoc? doc;
       try {
         doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
         control?.check();
         await for (final page in doc.render(pages: PdfPages.single(pageIndex),
           size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500))) {
@@ -1170,6 +1205,7 @@ class PdfService {
     final texts = <String>[];
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
       var index = 0;
       await for (final page in doc.render(
         pages: const PdfPages.all(),
@@ -1230,6 +1266,7 @@ class PdfService {
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
       return (await doc.signatures).isNotEmpty;
     } finally {
       await doc?.dispose();
@@ -1380,7 +1417,7 @@ class PdfService {
       if (!changed) {
         await source.copy(output.path);
         control?.check();
-        return _commitOutput(output);
+        return await _commitOutput(output);
       }
 
       control?.check();
@@ -1436,7 +1473,7 @@ class PdfService {
       }
 
       control?.check();
-      return _commitOutput(output);
+      return await _commitOutput(output);
     } catch (_) {
       // An extraction/encoding failure must not leave a misleading partial
       // "searchable" document in the user's library.
@@ -1597,7 +1634,7 @@ class PdfService {
         'token': token,
       });
       control?.check();
-      return _commitOutput(output);
+      return await _commitOutput(output);
     } catch (_) {
       if (await output.exists()) await output.delete();
       control?.check();
@@ -1625,7 +1662,7 @@ class PdfService {
       await sink.close();
       sink = null;
       _displayNames[output.path] = displayName(source);
-      return _commitOutput(output);
+      return await _commitOutput(output);
     } catch (_) {
       try { await sink?.close(); } catch (_) {}
       await secureDeleteTemporary(output);
@@ -1731,6 +1768,7 @@ class PdfService {
 
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      if (doc.isEncrypted) _protectedInputPaths.add(source.path);
       final last = endPage ?? doc.pageCount;
       if (startPage < 0 || last > doc.pageCount || startPage >= last) {
         throw RangeError('Choose a valid page range.');
@@ -1756,7 +1794,7 @@ class PdfService {
         }
       }
       control?.check();
-      return outputs;
+      return await Future.wait(outputs.map(_commitOutput));
     } catch (_) {
       for (final file in outputs) {
         await secureDeleteTemporary(file);

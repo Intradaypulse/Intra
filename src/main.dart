@@ -488,14 +488,14 @@ class _HomeScreenState extends State<HomeScreen> {
       await _scanDrafts.rememberOutput(pages, output);
       await _register(output);
       await _scanDrafts.discard(pages);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved ${pages.length}-page scan')));
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved ${pages.length}-page scan'))); }
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Scan not saved: $error. Captured pages are retained.'),
         duration: const Duration(seconds: 15),
         action: SnackBarAction(label: 'Retry', onPressed: () => _saveScan(pages)),
-      ));
+      )); }
     } finally { if (mounted) setState(() => _busy = false); }
   }
 
@@ -659,9 +659,12 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton.icon(
               onPressed: () async {
-                await SharePlus.instance.share(
-                  ShareParams(files: [XFile(textFile!.path)]),
-                );
+                try {
+                  await SharePlus.instance.share(ShareParams(files: [XFile(textFile!.path)]));
+                } catch (error) {
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Sharing failed. Please retry: $error')));
+                }
               },
               icon: const Icon(Icons.share_outlined),
               label: const Text('Share full text'),
