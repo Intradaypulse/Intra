@@ -704,7 +704,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'));
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
     } finally { _externalAction = false; }
   }
 
