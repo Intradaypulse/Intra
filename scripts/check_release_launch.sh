@@ -18,8 +18,5 @@ for attempt in 1 2; do
   test -s "release-launch-logs/pid-$attempt.txt"
   adb shell dumpsys activity activities > "release-launch-logs/activities-$attempt.txt"
   adb exec-out screencap -p > "release-launch-logs/screen-$attempt.png"
-  if rg -q 'FATAL EXCEPTION|Fatal signal|Unable to start activity|Unable to instantiate activity' "release-launch-logs/logcat-$attempt.txt"; then
-    cat "release-launch-logs/logcat-$attempt.txt"
-    exit 1
-  fi
 done
+python3 scripts/verify_release_launch_logs.py release-launch-logs
