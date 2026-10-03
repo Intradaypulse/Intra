@@ -7,6 +7,12 @@ RecognizedText sample(String value) => RecognizedText(text: value, blocks: [Text
   lines: [TextLine(text: value, elements: [], boundingBox: const Rect.fromLTWH(0, 0, 100, 20),
     recognizedLanguages: [], cornerPoints: [], confidence: null, angle: null)])]);
 void main() {
+  test('numeric-only recognition has a Latin fallback without rewarding CJK noise', () {
+    final text = sample('1234567890 12.50');
+    expect(ocrScriptScore(text, TextRecognitionScript.latin), greaterThan(0));
+    expect(ocrScriptScore(text, TextRecognitionScript.japanese), 0);
+    expect(ocrScriptScore(sample('   ...'), TextRecognitionScript.latin), 0);
+  });
   test('native letters outrank Latin noise for Devanagari detection', () {
     final text = sample('हिन्दी भाषा नमस्ते English');
     expect(ocrScriptScore(text, TextRecognitionScript.devanagiri),

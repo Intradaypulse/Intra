@@ -37,6 +37,7 @@ jobs:
           flutter --version
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
           cp src/pubspec.yaml buildapp/pubspec.yaml
+          cp src/pubspec.lock buildapp/pubspec.lock
           cp src/*.dart buildapp/lib/
           cp -r src/assets buildapp/assets
           python3 scripts/configure_native_overlay.py
@@ -91,7 +92,7 @@ jobs:
       - name: Dependency report
         working-directory: buildapp
         run: |
-          flutter pub get
+          flutter pub get --enforce-lockfile
           flutter pub outdated || true
 
       - name: Analyze

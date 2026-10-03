@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
+import 'output_protection.dart';
 
 class _MergeItem {
   _MergeItem({
@@ -13,8 +14,10 @@ class _MergeItem {
     required this.name,
     required this.size,
     this.thumb,
+    this.wasProtected = false,
   });
 
+  final bool wasProtected;
   File file;
   final String name;
   final int size;
@@ -120,7 +123,7 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
         final size = await file.length();
         if (!mounted) return;
         setState(() => _items.add(_MergeItem(
-          file: file, name: name, size: size, thumb: thumb,
+          file: file, name: name, size: size, thumb: thumb, wasProtected: file.path != picked.path || widget.service.wasProtected(file),
         )));
         pending.remove(file);
       }
@@ -154,6 +157,9 @@ class _AdvancedMergeScreenState extends State<AdvancedMergeScreen> {
     });
 
     try {
+      if (_items.any((item) => item.wasProtected)) {
+        if (!await confirmUnprotectedOutput(context) || !mounted) return;
+      }
       final output = await widget.service.mergeFiles(
         [for (final item in _items) item.file],
       );

@@ -40,7 +40,7 @@ double ocrScriptScore(RecognizedText result, TextRecognitionScript script) {
           TextRecognitionScript.korean => rune >= 0xAC00 && rune <= 0xD7AF || rune >= 0x1100 && rune <= 0x11FF,
           TextRecognitionScript.latin => rune >= 65 && rune <= 90 || rune >= 97 && rune <= 122 || rune >= 0xC0 && rune <= 0x24F,
         };
-        if (fits) score += (line.confidence ?? .8).clamp(.1, 1);
+        if (fits || (script == TextRecognitionScript.latin && rune >= 48 && rune <= 57)) score += (line.confidence ?? .8).clamp(.1, 1);
       }
     }
   }

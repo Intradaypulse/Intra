@@ -1,7 +1,7 @@
 name: pdfmate
 description: PDFMate beta build
 publish_to: none
-version: 0.4.0+5
+version: 0.4.1+6
 
 environment:
   sdk: ">=3.12.0 <4.0.0"

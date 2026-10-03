@@ -13,6 +13,7 @@ on:
       - "test/**"
       - "integration_test/**"
       - ".github/workflows/build-pdfmate-test-apk.yml"
+      - ".github/workflows/release-pdfmate.yml"
 
 permissions:
   contents: read
@@ -47,6 +48,7 @@ jobs:
           flutter --version
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
           cp src/pubspec.yaml buildapp/pubspec.yaml
+          cp src/pubspec.lock buildapp/pubspec.lock
           cp src/*.dart buildapp/lib/
           cp -r src/assets buildapp/assets
           python3 scripts/configure_native_overlay.py
@@ -151,7 +153,7 @@ jobs:
 
       - name: Resolve packages
         working-directory: buildapp
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze source
         working-directory: buildapp
@@ -162,7 +164,7 @@ jobs:
           mkdir -p /tmp/pdfmate-native-tests
           javac -d /tmp/pdfmate-native-tests android_native/CancellableOutputStream.java test/native/CancellableOutputStreamTest.java
           java -cp /tmp/pdfmate-native-tests CancellableOutputStreamTest
-          python3 test/native/test_release_launch_guard.py
+          python3 -m unittest discover -s test/native -p 'test_*.py' -v
 
       - name: Run regression tests
         working-directory: buildapp
@@ -286,6 +288,7 @@ jobs:
         run: |
           flutter create --platforms=android --org com.pdfmateapp --project-name pdfmate buildapp
           cp src/pubspec.yaml buildapp/pubspec.yaml
+          cp src/pubspec.lock buildapp/pubspec.lock
           cp src/*.dart buildapp/lib/
           cp -r src/assets buildapp/assets
           python3 scripts/configure_native_overlay.py
@@ -337,7 +340,7 @@ jobs:
 
       - name: Resolve packages
         working-directory: buildapp
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build integration-test APK
         working-directory: buildapp

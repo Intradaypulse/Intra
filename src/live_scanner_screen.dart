@@ -4,10 +4,10 @@ import 'dart:io' show File, Platform;
 import 'package:camera/camera.dart';
 import 'package:document_scan/document_scan.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'manual_crop_screen.dart';
 import 'scan_temp_session.dart';
+import 'scan_draft_store.dart';
 import 'scan_capture_gate.dart';
 import 'crop_geometry.dart';
 
@@ -40,6 +40,9 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   Future<void> _cameraQueue = Future<void>.value();
   bool _foreground = true;
   bool _disposed = false;
+  bool _leaving = false;
+  bool _confirmingExit = false;
+  final _drafts = ScanDraftStore();
 
   Future<void> _queueCamera(Future<void> Function() action) {
     final next = _cameraQueue.then((_) => action());
@@ -260,6 +263,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     if (!_foreground ||
         _disposed ||
         _capturing ||
+        _confirmingExit ||
         controller == null ||
         !controller.value.isInitialized) {
       return;
@@ -296,16 +300,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       );
 
       if (result != null && mounted) {
-        final dir = await getTemporaryDirectory();
-        final file = File(
-          '${dir.path}/pdfmate_scan_${DateTime.now().microsecondsSinceEpoch}.jpg',
-        );
-        try {
-          await file.writeAsBytes(result.bytes, flush: true);
-        } catch (_) {
-          await _tempSession.deletePath(file.path);
-          rethrow;
-        }
+        final file = await _drafts.append(result.bytes);
         _tempSession.own(file.path);
         if (!mounted) return;
         setState(() {
@@ -360,6 +355,27 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     } catch (_) {}
   }
 
+  Future<void> _requestExit() async {
+    if (_capturing || _confirmingExit) return;
+    _confirmingExit = true;
+    final choice = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Keep your scanned pages?'),
+      content: const Text('Save these pages as a PDF, continue scanning, or discard them.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, 'continue'), child: const Text('Continue scanning')),
+        TextButton(onPressed: () => Navigator.pop(context, 'discard'), child: const Text('Discard')),
+        FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Save PDF')),
+      ],
+    ));
+    _confirmingExit = false;
+    if (!mounted) return;
+    if (choice == 'save') { _finish(); }
+    if (choice == 'discard') {
+      setState(() => _leaving = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) Navigator.of(context).pop(); });
+    }
+  }
+
   void _finish() {
     if (_capturing) return;
     if (_pages.isEmpty) {
@@ -367,7 +383,10 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       return;
     }
     final paths = _tempSession.handOff([for (final page in _pages) page.path]);
-    Navigator.of(context).pop<List<String>>(paths);
+    setState(() => _leaving = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop<List<String>>(paths);
+    });
   }
 
   Future<void> _teardown() => _queueCamera(_teardownCamera);
@@ -410,7 +429,10 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   Widget build(BuildContext context) {
     final controller = _controller;
 
-    return Scaffold(
+    return PopScope(
+      canPop: _leaving || (!_capturing && _pages.isEmpty),
+      onPopInvokedWithResult: (didPop, result) { if (!didPop) _requestExit(); },
+      child: Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
@@ -530,6 +552,8 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                                 borderRadius: BorderRadius.circular(8),
                                 child: Image.file(
                                   _pages[index],
+                                  cacheWidth: 240,
+                                  cacheHeight: 320,
                                   fit: BoxFit.cover,
                                 ),
                               ),
@@ -588,7 +612,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                   ),
               ],
             ),
-    );
+    ));
   }
 }
 
