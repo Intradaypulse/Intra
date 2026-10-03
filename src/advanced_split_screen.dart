@@ -6,7 +6,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
 
-enum SplitMode { everyPage, everyN, custom }
+enum SplitMode { everyPage, everyN, custom, selected }
 
 class AdvancedSplitScreen extends StatefulWidget {
   const AdvancedSplitScreen({super.key, required this.service});
@@ -21,7 +21,8 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
   File? _source;
   String? _password;
   int _pageCount = 0;
-  SplitMode _mode = SplitMode.custom;
+  SplitMode _mode = SplitMode.selected;
+  final Set<int> _selectedPages = {};
   final _everyController = TextEditingController(text: '5');
   final _rangeController = TextEditingController(text: '1-3;4-6');
   bool _busy = false;
@@ -89,6 +90,7 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
             _source = file;
             _password = password;
             _pageCount = count;
+            _selectedPages.clear();
             _status = '$count pages ready to split.';
           });
           if (previous?.path != file.path) {
@@ -220,6 +222,10 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
             every,
             password: _password,
           );
+        case SplitMode.selected:
+          if (_selectedPages.isEmpty) throw const FormatException('Select at least one page.');
+          outputs = await widget.service.splitRanges(source,
+            [_selectedPages.toList()..sort()], password: _password);
         case SplitMode.custom:
           final ranges = _parseCustomRanges(_rangeController.text);
           outputs = await widget.service.splitRanges(
@@ -283,30 +289,34 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              SegmentedButton<SplitMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: SplitMode.everyPage,
-                    icon: Icon(Icons.filter_1_outlined),
-                    label: Text('Each page'),
-                  ),
-                  ButtonSegment(
-                    value: SplitMode.everyN,
-                    icon: Icon(Icons.view_agenda_outlined),
-                    label: Text('Every N'),
-                  ),
-                  ButtonSegment(
-                    value: SplitMode.custom,
-                    icon: Icon(Icons.tune_rounded),
-                    label: Text('Custom'),
-                  ),
+              DropdownButtonFormField<SplitMode>(
+                initialValue: _mode,
+                decoration: const InputDecoration(labelText: 'Split mode'),
+                items: const [
+                  DropdownMenuItem(value: SplitMode.selected, child: Text('Select page numbers')),
+                  DropdownMenuItem(value: SplitMode.everyPage, child: Text('Each page')),
+                  DropdownMenuItem(value: SplitMode.everyN, child: Text('Every N pages')),
+                  DropdownMenuItem(value: SplitMode.custom, child: Text('Custom output groups')),
                 ],
-                selected: {_mode},
-                onSelectionChanged: _busy
-                    ? null
-                    : (value) => setState(() => _mode = value.first),
+                onChanged: _busy ? null : (value) => setState(() => _mode = value!),
               ),
               const SizedBox(height: 20),
+              if (_mode == SplitMode.selected) ...[
+                Text('${_selectedPages.length} pages selected • one output PDF'),
+                if (_pageCount > 0) SizedBox(height: 280, child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 130, mainAxisExtent: 56),
+                  itemCount: _pageCount,
+                  itemBuilder: (context, index) => CheckboxListTile(
+                    dense: true, contentPadding: EdgeInsets.zero,
+                    title: Text('${index + 1}'), value: _selectedPages.contains(index),
+                    onChanged: _busy ? null : (checked) => setState(() {
+                      if (checked == true) { _selectedPages.add(index); }
+                      else { _selectedPages.remove(index); }
+                    }),
+                  ),
+                )),
+              ],
               if (_mode == SplitMode.everyPage)
                 const ListTile(
                   contentPadding: EdgeInsets.zero,

@@ -6,19 +6,39 @@ import 'package:document_scan/document_scan.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart' as pdf_format;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'pdf_rules.dart';
 import 'ocr_layout.dart';
+import 'ocr_languages.dart';
 import 'scan_temp_session.dart';
 import 'serial_executor.dart';
+
+Future<Uint8List> _encodeImagePdfPage(String path) async {
+  final bytes = await File(path).readAsBytes();
+  final image = pw.MemoryImage(bytes);
+  final width = image.width, height = image.height;
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    throw StateError('Could not read image dimensions.');
+  }
+  final scale = 842 / math.max(width, height);
+  final document = pw.Document();
+  document.addPage(pw.Page(
+    pageFormat: pdf_format.PdfPageFormat(width * scale, height * scale),
+    margin: pw.EdgeInsets.zero,
+    build: (_) => pw.Image(image, fit: pw.BoxFit.contain),
+  ));
+  return document.save();
+}
 
 class PdfOperationCancelled implements Exception {
   @override
@@ -72,6 +92,19 @@ class CompressionResult {
       : ((originalBytes - outputBytes) / originalBytes * 100)
             .clamp(-999, 100)
             .toDouble();
+}
+
+class OcrPagePreview {
+  const OcrPagePreview({required this.bytes, required this.width, required this.height,
+    required this.text, required this.script});
+  final Uint8List bytes;
+  final int width, height;
+  final RecognizedText text;
+  final TextRecognitionScript script;
+  List<String> get languages => {
+    for (final block in text.blocks)
+      for (final line in block.lines) ...line.recognizedLanguages.where((language) => language != 'und'),
+  }.toList();
 }
 
 class PdfService {
@@ -272,29 +305,44 @@ class PdfService {
   }
 
   Future<File?> imagesToPdf() async {
-    final images = await imagePicker.pickMultiImage(imageQuality: 92);
+    final images = await imagePicker.pickMultiImage();
     if (images.isEmpty) return null;
 
-    return _writeNewPdf('Images', (pdf, sink) => pdf.imagesToPdf([
-      for (final image in images) FileSource(File(image.path)) as DataSource,
-    ], sink));
+    return imageFilesToPdf([for (final image in images) File(image.path)], prefix: 'Images');
   }
 
   Future<File> _imagesToPdfBytes(List<Uint8List> images, String prefix) async {
-    final document = pw.Document();
-    for (final bytes in images) {
-      final image = pw.MemoryImage(bytes);
-      document.addPage(
-        pw.Page(
-          margin: const pw.EdgeInsets.all(14),
-          build: (_) =>
-              pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain)),
-        ),
-      );
+    final files = <File>[];
+    try {
+      for (final bytes in images) {
+        final file = await _newManagedTempFile('image_input', extension: 'png');
+        files.add(file);
+        await file.writeAsBytes(bytes, flush: true);
+      }
+      return await imageFilesToPdf(files, prefix: prefix);
+    } finally {
+      for (final file in files) { await secureDeleteTemporary(file); }
     }
-    final file = await _newFile(prefix);
-    await file.writeAsBytes(await document.save(), flush: true);
-    return file;
+  }
+
+  /// Preserve each image's ratio. Only one image is retained in Dart while
+  /// encoding; file-backed native merge avoids a document-sized bytes list.
+  Future<File> imageFilesToPdf(List<File> images, {String prefix = 'Images'}) async {
+    if (images.isEmpty) throw ArgumentError('Select at least one image.');
+    final pages = <File>[];
+    try {
+      for (final file in images) {
+        final encoded = await compute(_encodeImagePdfPage, file.path);
+        final page = await _newManagedTempFile('image_page', extension: 'pdf');
+        pages.add(page);
+        await page.writeAsBytes(encoded, flush: true);
+      }
+      return await _writeNewPdf(prefix, (pdf, sink) => pdf.merge([
+        for (final page in pages) FileSource(page) as DataSource,
+      ], sink));
+    } finally {
+      for (final page in pages) { await secureDeleteTemporary(page); }
+    }
   }
 
   Future<PlatformFile?> pickPdf() => FilePicker.pickFile(
@@ -1022,6 +1070,73 @@ class PdfService {
     ];
   }
 
+  Future<OcrPagePreview> recognizePage(File source, int pageIndex, {
+    TextRecognitionScript? script, String? password, PdfOperationControl? control,
+  }) async {
+    final bytes = await _renderQueue.run(() async {
+      control?.check();
+      final pdf = Pdf();
+      PdfDoc? doc;
+      try {
+        doc = await pdf.open(FileSource(source), password: password);
+        control?.check();
+        await for (final page in doc.render(pages: PdfPages.single(pageIndex),
+          size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500))) {
+          control?.check();
+          return page.data;
+        }
+        throw StateError('Could not render page ${pageIndex + 1}.');
+      } finally {
+        await doc?.dispose();
+        await pdf.dispose();
+      }
+    });
+    final image = img.decodePng(bytes);
+    if (image == null) throw StateError('Could not decode page.');
+    final file = await _newManagedTempFile('preview_ocr', extension: 'png');
+    RecognizedText? best;
+    var selected = script ?? TextRecognitionScript.latin;
+    var bestScore = -1.0;
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      for (final candidate in script == null ? TextRecognitionScript.values : [script]) {
+        await control?.checkpoint();
+        final recognizer = TextRecognizer(script: candidate);
+        try {
+          final text = await recognizer.processImage(InputImage.fromFilePath(file.path));
+          control?.check();
+          final score = ocrScriptScore(text, candidate);
+          if (best == null || score > bestScore) {
+            best = text;
+            selected = candidate;
+            bestScore = score;
+          }
+        } finally { await recognizer.close(); }
+      }
+      return OcrPagePreview(bytes: bytes, width: image.width, height: image.height,
+        text: best!, script: selected);
+    } finally { await secureDeleteTemporary(file); }
+  }
+
+  Future<TextRecognitionScript> detectOcrScript(File source, {
+    String? password, PdfOperationControl? control,
+  }) async {
+    final count = await pageCount(source, password: password);
+    final scores = <TextRecognitionScript, double>{};
+    // Sample start/middle/end to avoid a blank cover deciding the whole document.
+    for (final index in {0, count ~/ 2, count - 1}) {
+      if (index < 0) continue;
+      await control?.checkpoint();
+      final page = await recognizePage(source, index, password: password, control: control);
+      final score = ocrScriptScore(page.text, page.script);
+      scores.update(page.script, (old) => old + score, ifAbsent: () => score);
+    }
+    if (scores.isEmpty || scores.values.every((value) => value == 0)) {
+      throw StateError('No readable text detected. Choose the OCR language manually.');
+    }
+    return scores.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+  }
+
   Future<List<String>> ocrPdf(
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
@@ -1498,9 +1613,7 @@ class PdfService {
   Future<File> createScannedPdfFromFiles(List<String> paths) async {
     if (paths.isEmpty) throw ArgumentError('No scanned pages supplied.');
     try {
-      return await _writeNewPdf('Scan', (pdf, sink) => pdf.imagesToPdf([
-        for (final path in paths) FileSource(File(path)) as DataSource,
-      ], sink));
+      return await imageFilesToPdf([for (final path in paths) File(path)], prefix: 'Scan');
     } finally {
       final temp = await _tmp();
       for (final path in paths) {

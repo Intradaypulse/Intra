@@ -66,6 +66,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(merge ? find.byTooltip('Add PDFs') : find.text('Choose'));
       await tester.pumpAndSettle();
+      if (!merge) { await tester.tap(find.widgetWithText(CheckboxListTile, '1')); }
+      await tester.ensureVisible(find.text(merge ? 'Merge 2 PDFs' : 'Split PDF'));
       await tester.tap(find.text(merge ? 'Merge 2 PDFs' : 'Split PDF'));
       await tester.pump();
       await navigator.currentState!.maybePop();

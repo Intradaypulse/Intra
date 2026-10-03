@@ -9,6 +9,7 @@ import 'package:pdfx/pdfx.dart';
 
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
+import 'ocr_page_preview_screen.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   const PdfViewerScreen({
@@ -395,6 +396,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          IconButton(tooltip: 'Scan and copy text on this page',
+            icon: const Icon(Icons.document_scanner_outlined),
+            onPressed: _busy || _workingPath == null || _searching ? null : () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => OcrPagePreviewScreen(
+                service: _service, source: File(_workingPath!), initialPage: _page - 1, pageCount: _pages)));
+            }),
           if (_pages > 0)
             TextButton(
               onPressed: _jumpToPage,

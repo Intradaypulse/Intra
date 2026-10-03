@@ -6,9 +6,11 @@ class DraggableCornerOverlay extends StatefulWidget {
     super.key,
     required this.corners,
     required this.onCornerMoved,
+    this.onActiveCornerChanged,
   });
 
   final DocumentCorners corners;
+  final ValueChanged<int?>? onActiveCornerChanged;
   final void Function(int index, ({double x, double y}) point) onCornerMoved;
 
   @override
@@ -50,6 +52,7 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
       _dragOffset = _toLocal(points[nearest]) - details.localPosition;
     }
     setState(() => _activeHandle = nearest >= 0 ? nearest : null);
+    widget.onActiveCornerChanged?.call(_activeHandle);
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
@@ -62,7 +65,10 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
     ));
   }
 
-  void _onPanEnd(DragEndDetails _) => setState(() => _activeHandle = null);
+  void _endDrag() {
+    setState(() => _activeHandle = null);
+    widget.onActiveCornerChanged?.call(null);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,8 +79,8 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
           behavior: HitTestBehavior.opaque,
           onPanStart: _onPanStart,
           onPanUpdate: _onPanUpdate,
-          onPanEnd: _onPanEnd,
-          onPanCancel: () => setState(() => _activeHandle = null),
+          onPanEnd: (_) => _endDrag(),
+          onPanCancel: _endDrag,
           child: CustomPaint(
             painter: _CornerPainter(
               corners: widget.corners,

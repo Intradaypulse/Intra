@@ -7,6 +7,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'advanced_merge_screen.dart';
+import 'app_theme.dart';
 import 'advanced_split_screen.dart';
 import 'compression_screen.dart';
 import 'ocr_screen.dart';
@@ -110,21 +111,8 @@ class _PDFMateAppState extends State<PDFMateApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'PDFMate',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF315EF5),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFF7F8FC),
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6E8BFF),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: pdfMateTheme(Brightness.light),
+      darkTheme: pdfMateTheme(Brightness.dark),
       themeMode: _themeMode,
       home: !_ready
           ? _LaunchScreen(error: _settingsError, onRetry: _loadSettings)
@@ -1252,8 +1240,8 @@ class _ToolCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
+    return GlassSurface(child: Material(
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -1276,7 +1264,7 @@ class _ToolCard extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 

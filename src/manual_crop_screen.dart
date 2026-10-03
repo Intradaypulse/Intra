@@ -49,6 +49,7 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
   Size? _imageSize;
   bool _busy = true;
   String? _error;
+  int? _activeCorner;
   ScanFilter _filter = ScanFilter.enhance;
 
   @override
@@ -57,7 +58,7 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
     _prepare();
   }
 
-  Future<void> _prepare() async {
+  Future<void> _prepare({bool redetect = false}) async {
     setState(() {
       _busy = true;
       _error = null;
@@ -66,15 +67,15 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
       final size = await _decodeSize(widget.imagePath);
       if (size == null) throw StateError('The photo could not be opened.');
       final detected =
-          widget.initialCorners ??
+          (redetect ? null : widget.initialCorners) ??
           await _detector.detect(
             ScanInput.file(widget.imagePath),
-            sensitivity: DetectionSensitivity.lenient,
+            sensitivity: DetectionSensitivity.strict,
           );
       if (!mounted) return;
       setState(() {
         _imageSize = size;
-        _corners = detected ?? _fallback;
+        _corners = detected != null && validCropCorners(detected) ? detected : _fallback;
       });
     } catch (e) {
       if (mounted) setState(() => _error = 'Could not prepare photo: $e');
@@ -125,7 +126,8 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
         ScanInput.file(widget.imagePath),
         corners: corners,
         filter: _filter,
-        output: const ScanOutputFormat.jpegAt(88),
+        output: const ScanOutputFormat.jpegAt(96),
+        maxDimension: 4096,
       );
       if (!mounted) return;
       if (scan == null) {
@@ -149,6 +151,24 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Widget _cornerZoom(DocumentCorners corners, Size size) {
+    final point = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft][_activeCorner!];
+    return Positioned(
+      top: 12, left: point.x > .5 ? 12 : null, right: point.x <= .5 ? 12 : null,
+      child: IgnorePointer(child: Container(
+        width: 132, height: 132,
+        decoration: BoxDecoration(border: Border.all(color: Colors.white, width: 3),
+          borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(blurRadius: 8)]),
+        child: ClipRRect(borderRadius: BorderRadius.circular(13), child: Stack(children: [
+          Positioned(left: 66 - point.x * 500, top: 66 - point.y * 500 * size.height / size.width,
+            width: 500, height: 500 * size.height / size.width,
+            child: Image.file(File(widget.imagePath), fit: BoxFit.fill, cacheWidth: 1600)),
+          const Center(child: Icon(Icons.add, color: Colors.lightBlueAccent, size: 24)),
+        ])),
+      )),
+    );
   }
 
   @override
@@ -198,7 +218,10 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
                               DraggableCornerOverlay(
                                 corners: corners,
                                 onCornerMoved: _moveCorner,
+                                onActiveCornerChanged: (index) => setState(() => _activeCorner = index),
                               ),
+                              if (_activeCorner != null)
+                                _cornerZoom(corners, size),
                             ],
                           ),
                         ),
@@ -213,6 +236,13 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
                     const Text(
                       'Drag the 4 handles if auto-detection is not exact.',
                     ),
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      TextButton(onPressed: () => _prepare(redetect: true), child: const Text('Detect again')),
+                      TextButton(onPressed: () => setState(() => _corners = const DocumentCorners(
+                        topLeft: (x: 0, y: 0), topRight: (x: 1, y: 0),
+                        bottomRight: (x: 1, y: 1), bottomLeft: (x: 0, y: 1))),
+                        child: const Text('Full photo')),
+                    ]),
                     const SizedBox(height: 10),
                     SegmentedButton<ScanFilter>(
                       segments: const [

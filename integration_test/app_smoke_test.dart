@@ -8,6 +8,8 @@ import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf_manipulator/pdf_manipulator.dart';
+import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/live_scanner_screen.dart';
 import 'package:pdfmate/main.dart' as app;
 import 'package:pdfmate/pdf_service.dart';
@@ -100,6 +102,36 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 3)),
   );
+
+  testWidgets('image PDFs preserve tall and wide aspect ratios and clean up failed jobs', (tester) async {
+    final root = await Directory.systemTemp.createTemp('pdfmate_image_ratio_');
+    final temp = await Directory('${root.path}/temp').create();
+    final docs = await Directory('${root.path}/docs').create();
+    final service = PdfService(documentsDirectoryProvider: () async => docs,
+      temporaryDirectoryProvider: () async => temp);
+    final engine = Pdf();
+    PdfDoc? doc;
+    try {
+      final tall = File('${root.path}/tall.png');
+      final wide = File('${root.path}/wide.png');
+      await tall.writeAsBytes(img.encodePng(img.Image(width: 100, height: 400)));
+      await wide.writeAsBytes(img.encodePng(img.Image(width: 400, height: 100)));
+      final output = await service.imageFilesToPdf([tall, wide]);
+      doc = await engine.open(FileSource(output));
+      expect(doc.pageCount, 2);
+      expect(doc.pages[0].effectiveWidth / doc.pages[0].effectiveHeight, closeTo(.25, .001));
+      expect(doc.pages[1].effectiveWidth / doc.pages[1].effectiveHeight, closeTo(4, .001));
+      final invalid = File('${root.path}/bad.png');
+      await invalid.writeAsString('invalid image');
+      await expectLater(service.imageFilesToPdf([tall, invalid]), throwsA(anything));
+      expect(await temp.list().toList(), isEmpty);
+      expect(await docs.list().toList(), hasLength(1));
+    } finally {
+      await doc?.dispose();
+      await engine.dispose();
+      await root.delete(recursive: true);
+    }
+  });
 
   testWidgets('Android scoped-storage exports return confirmed destinations', (
     tester,
