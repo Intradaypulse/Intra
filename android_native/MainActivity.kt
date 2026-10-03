@@ -15,6 +15,7 @@ import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
 import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
@@ -31,6 +32,7 @@ import kotlin.math.*
 
 /** A single worker keeps PDF parsing/writing off Android's UI thread. */
 class MainActivity : FlutterActivity() {
+    private class OwnerPasswordRequiredException : Exception("This PDF disallows content changes. Enter the owner password.")
     private val pdfWorker = Executors.newSingleThreadExecutor()
     private val ownedCancellations = ConcurrentHashMap<String, AtomicBoolean>()
     companion object {
@@ -57,13 +59,13 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                     return@setMethodCallHandler
                 }
-                if (call.method != "append") { result.notImplemented(); return@setMethodCallHandler }
+                if (call.method != "append" && call.method != "checkModify") { result.notImplemented(); return@setMethodCallHandler }
                 val source = call.argument<String>("source")
                 val output = call.argument<String>("output")
                 val manifest = call.argument<String>("manifest")
                 val password = call.argument<String>("password") ?: ""
                 val token = call.argument<String>("token") ?: java.util.UUID.randomUUID().toString()
-                if (source == null || output == null || manifest == null) {
+                if (source == null || (call.method == "append" && (output == null || manifest == null))) {
                     result.error("ARGUMENT", "Missing document paths", null)
                     return@setMethodCallHandler
                 }
@@ -72,11 +74,22 @@ class MainActivity : FlutterActivity() {
                 ownedCancellations[token] = cancelled
                 pdfWorker.execute {
                     try {
-                        appendOverlay(File(source), File(output), File(manifest), password, cancelled)
+                        if (call.method == "checkModify") {
+                            PDDocument.load(File(source), password, MemoryUsageSetting.setupTempFileOnly().setTempDir(cacheDir)).use { doc ->
+                                if (!doc.currentAccessPermission.canModify()) throw OwnerPasswordRequiredException()
+                            }
+                        } else {
+                            appendOverlay(File(source), File(output!!), File(manifest!!), password, cancelled)
+                        }
                         Handler(Looper.getMainLooper()).post { result.success(null) }
                     } catch (error: Exception) {
                         Handler(Looper.getMainLooper()).post {
-                            result.error("OCR_OVERLAY", error.message ?: "Could not add OCR layer", null)
+                            val code = when (error) {
+                                is OwnerPasswordRequiredException -> "OCR_OWNER_PASSWORD_REQUIRED"
+                                is InvalidPasswordException -> "OCR_WRONG_PASSWORD"
+                                else -> "OCR_OVERLAY"
+                            }
+                            result.error(code, error.message ?: "Could not add OCR layer", null)
                         }
                     } finally {
                         cancellations.remove(token, cancelled)
@@ -112,9 +125,7 @@ class MainActivity : FlutterActivity() {
             }
             val memory = MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)
             PDDocument.load(source, password, memory).use { doc ->
-                require(doc.currentAccessPermission.canModify()) {
-                    "This PDF disallows content changes. Open it with the owner password."
-                }
+                if (!doc.currentAccessPermission.canModify()) throw OwnerPasswordRequiredException()
                 // Certified documents can forbid content changes even in a new revision.
                 val permissions = doc.documentCatalog.cosObject.getCOSDictionary(COSName.PERMS)
                 require(permissions?.getDictionaryObject(COSName.DOCMDP) == null) {

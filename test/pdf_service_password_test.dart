@@ -180,6 +180,7 @@ void main() {
     expect(await result.file.exists(), isTrue);
     expect(await service.pageCount(result.file), 3);
 
+    await service.secureDeleteTemporary(result.file);
     final leftovers = await temp
         .list()
         .where((e) => e.path.contains('pdfmate_secure_tmp_'))

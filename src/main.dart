@@ -264,7 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _recoverFiles() async {
     try {
       final outputs = await _service.recoverableOutputs();
-      await _store.addMany([for (final file in outputs)
+      await _store.recoverMissing([for (final file in outputs)
         PdfRecord(path: file.path, name: file.uri.pathSegments.last,
           createdAt: await file.lastModified())]);
       await _loadFiles();
@@ -637,7 +637,22 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _busy = true);
     File? textFile;
     try {
-      final result = await _service.extractPdfTextToFile();
+      final result = await _service.extractPdfTextToFile(requestPassword: (wrong) async {
+        if (!mounted) return null;
+        final controller = TextEditingController();
+        try {
+          return await showDialog<String>(context: context, barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: Text(wrong ? 'Wrong password. Try again' : 'PDF password'),
+              content: TextField(controller: controller, obscureText: true,
+                autofocus: true, decoration: const InputDecoration(labelText: 'Password')),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Open')),
+              ],
+            ));
+        } finally { controller.dispose(); }
+      });
       if (result == null) return;
       textFile = result.$1;
       final text = result.$2;

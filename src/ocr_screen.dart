@@ -46,19 +46,19 @@ class _OcrScreenState extends State<OcrScreen> {
     TextRecognitionScript.korean => 'Korean',
   };
 
-  Future<String?> _askPassword() async {
+  Future<String?> _askPassword({bool owner = false, bool wrong = false}) async {
     final controller = TextEditingController();
     final value = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('PDF password'),
+        title: Text(owner ? (wrong ? 'Wrong owner password. Try again' : 'Owner password required') : 'PDF password'),
         content: TextField(
           controller: controller,
           obscureText: true,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
+          decoration: InputDecoration(
+            labelText: owner ? 'Owner password' : 'Password',
             border: OutlineInputBorder(),
           ),
         ),
@@ -397,6 +397,22 @@ class _OcrScreenState extends State<OcrScreen> {
       },
     );
     try {
+      while (true) {
+        try {
+          await widget.service.checkOcrPermission(source, password: _password);
+          break;
+        } on PlatformException catch (error) {
+          if (error.code != 'OCR_OWNER_PASSWORD_REQUIRED' && error.code != 'OCR_WRONG_PASSWORD') rethrow;
+          if (!mounted) return;
+          final password = await _askPassword(owner: true, wrong: error.code == 'OCR_WRONG_PASSWORD');
+          if (password == null) {
+            if (mounted) setState(() => _status = 'Cancelled.');
+            return;
+          }
+          _password = password;
+        }
+      }
+      if (!mounted) return;
       await _resolveLanguage(source);
       final output = await widget.service.makeSearchablePdf(
         source,

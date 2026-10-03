@@ -665,7 +665,9 @@ class PdfService {
     }
   }
 
-  Future<(File, String)?> extractPdfTextToFile() async {
+  Future<(File, String)?> extractPdfTextToFile({
+    Future<String?> Function(bool wrongPassword)? requestPassword,
+  }) async {
     final source = await pickPdfFile();
     if (source == null) return null;
     final output = await newTemporaryTextFile();
@@ -676,7 +678,21 @@ class PdfService {
     var previewLength = 0;
     var hasText = false;
     try {
-      doc = await pdf.open(FileSource(source));
+      String? password;
+      while (true) {
+        try {
+          doc = await pdf.open(FileSource(source), password: password);
+          break;
+        } on PdfPasswordRequired {
+          if (requestPassword == null) rethrow;
+          password = await requestPassword(false);
+          if (password == null) { await secureDeleteTemporary(output); return null; }
+        } on PdfWrongPassword {
+          if (requestPassword == null) rethrow;
+          password = await requestPassword(true);
+          if (password == null) { await secureDeleteTemporary(output); return null; }
+        }
+      }
       writer = output.openWrite();
       for (var i = 0; i < doc.pageCount; i++) {
         final text = await doc.extract(pages: PdfPages.single(i));
@@ -808,8 +824,15 @@ class PdfService {
         CompressionPreset.balanced => PdfImagePolicy.ebook,
         CompressionPreset.smallest => PdfImagePolicy.screen,
       };
-      output = await _writeNewPdf('Compressed', (pdf, sink) =>
-        pdf.compress(FileSource(decryptedTemp ?? source), sink, images: policy));
+      final preview = await _newManagedTempFile('Compressed');
+      try {
+        output = await _writeNewPdf('Compressed', (pdf, sink) =>
+          pdf.compress(FileSource(decryptedTemp ?? source), sink, images: policy),
+          destination: preview);
+      } catch (_) {
+        await secureDeleteTemporary(preview);
+        rethrow;
+      }
       return CompressionResult(file: output, originalBytes: originalBytes,
         outputBytes: await output.length());
     } catch (_) {
@@ -818,6 +841,26 @@ class PdfService {
     } finally {
       await secureDeleteTemporary(decryptedTemp);
     }
+  }
+
+  /// Publish only after the user chooses Save. Startup recovery can then find
+  /// this complete output even if the library registration is interrupted.
+  Future<File> publishCompressionPreview(File preview) async {
+    if (!isManagedTemporaryFile(preview)) {
+      throw StateError('Compression preview is not owned by this session');
+    }
+    final pending = await _newFile('Compressed');
+    try {
+      await preview.copy(pending.path);
+      final handle = await pending.open(mode: FileMode.append);
+      try { await handle.flush(); } finally { await handle.close(); }
+      final published = await _commitOutput(pending);
+      await secureDeleteTemporary(preview);
+      return published;
+    } catch (_) {
+      try { if (await pending.exists()) await pending.delete(); } catch (_) {}
+      rethrow;
+    } finally { _pendingOutputs.remove(pending.path); }
   }
 
   Future<File> _writeNewPdf(String prefix,
@@ -1033,6 +1076,7 @@ class PdfService {
     if (every < 1) throw ArgumentError.value(every, 'every');
     final count = await pageCount(source, password: password);
     final files = <File>[];
+    final pendingPaths = <String>[];
     final engine = Pdf();
     try {
       for (var start = 0; start < count; start += every) {
@@ -1040,29 +1084,40 @@ class PdfService {
           every == 1 ? 'Page_${start + 1}' : 'Split_${files.length + 1}',
         );
         files.add(file);
-        final sink = await FileSink.create(file);
-        try {
-          await engine.extractPages(
-            FileSource(source),
-            sink,
-            pages: [
-              for (var i = start; i < math.min(start + every, count); i++) i,
-            ],
-            password: password,
-          );
-        } finally {
-          await sink.close();
-        }
+        pendingPaths.add(file.path);
+        await writeSplitPart(engine, source, file, [
+          for (var i = start; i < math.min(start + every, count); i++) i,
+        ], password: password);
       }
       for (var i = 0; i < files.length; i++) { files[i] = await _commitOutput(files[i]); }
-      return await Future.wait(files.map(_commitOutput));
+      return files;
     } catch (_) {
       for (final file in files) {
-        if (await file.exists()) await file.delete();
+        try { await deleteFailedSplitOutput(file); } catch (_) {}
       }
       rethrow;
     } finally {
-      await engine.dispose();
+      for (final path in pendingPaths) { _pendingOutputs.remove(path); }
+      try { await engine.dispose(); } catch (_) {}
+    }
+  }
+
+  /// Overridable filesystem boundary for storage failure regression tests.
+  Future<void> deleteFailedSplitOutput(File file) async {
+    if (await file.exists()) await file.delete();
+  }
+
+  Future<void> writeSplitPart(Pdf engine, File source, File output,
+      List<int> pages, {String? password}) async {
+    FileSink? sink;
+    try {
+      sink = await FileSink.create(output);
+      await engine.extractPages(FileSource(source), sink, pages: pages, password: password);
+      await sink.close();
+      sink = null;
+    } catch (_) {
+      try { await sink?.close(); } catch (_) {}
+      rethrow;
     }
   }
 
@@ -1303,6 +1358,11 @@ class PdfService {
       control: control, tableRows: tableRows);
   }
 
+  Future<void> checkOcrPermission(File source, {String? password}) async {
+    await const MethodChannel('pdfmate/unicode_overlay').invokeMethod<void>(
+      'checkModify', {'source': source.path, 'password': password});
+  }
+
   /// Add an invisible embedded-font layer in an incremental revision. Only
   /// OCR geometry is spooled; rendered page images are deleted immediately.
   Future<File> _makeNativeSearchablePdf(
@@ -1433,10 +1493,11 @@ class PdfService {
       control?.check();
       return await _commitOutput(output);
     } catch (_) {
-      if (await output.exists()) await output.delete();
+      try { if (await output.exists()) await output.delete(); } catch (_) {}
       control?.check();
       rethrow;
     } finally {
+      _pendingOutputs.remove(output.path);
       control?.onCancel = null;
       // A full disk can fail both flush and close; cleanup must still run.
       try {

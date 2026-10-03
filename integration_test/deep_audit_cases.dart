@@ -13,6 +13,40 @@ import 'package:pdfmate/pdf_service.dart';
 import 'overlay_fixture.dart';
 
 void registerDeepAuditCases() {
+  for (final userPassword in ['', 'open-secret']) {
+    testWidgets('native OCR requires owner authentication userPassword=$userPassword', (tester) async {
+      final root = await (await getTemporaryDirectory()).createTemp('owner_ocr_');
+      final service = PdfService(documentsDirectoryProvider: () async => root,
+        temporaryDirectoryProvider: () async => root);
+      final engine = Pdf();
+      PdfDoc? result;
+      try {
+        final raw = File('${root.path}/raw.pdf');
+        final pdf = pw.Document()..addPage(pw.Page(build: (_) => pw.SizedBox()));
+        await raw.writeAsBytes(await pdf.save());
+        final protected = await service.protectPdfAdvanced(raw,
+          ownerPassword: 'owner-secret', userPassword: userPassword, readOnly: true);
+        await expectLater(service.checkOcrPermission(protected, password: userPassword),
+          throwsA(isA<PlatformException>().having((e) => e.code, 'code', 'OCR_OWNER_PASSWORD_REQUIRED')));
+        await expectLater(service.checkOcrPermission(protected, password: 'wrong'),
+          throwsA(isA<PlatformException>().having((e) => e.code, 'code', 'OCR_WRONG_PASSWORD')));
+        await service.checkOcrPermission(protected, password: 'owner-secret');
+        final manifest = await File('${root.path}/words.jsonl').writeAsString(jsonEncode({
+          'page': 0, 'words': [{'text': 'Authorized', 'x': 30, 'y': 80,
+            'width': 100, 'height': 20, 'angle': 0}],
+        }));
+        final output = File('${root.path}/output.pdf');
+        await const MethodChannel('pdfmate/unicode_overlay').invokeMethod<void>('append', {
+          'source': protected.path, 'output': output.path, 'manifest': manifest.path,
+          'password': 'owner-secret',
+        });
+        result = await engine.open(FileSource(output), password: 'owner-secret');
+        expect(await result.extract(), contains('Authorized'));
+      } finally {
+        await result?.dispose(); await engine.dispose(); await root.delete(recursive: true);
+      }
+    });
+  }
   testWidgets('invisible Latin Hindi CJK and supplementary Unicode preserve cropped rotated pixels', (tester) async {
     final root = await (await getTemporaryDirectory()).createTemp('ocr_geometry_');
     final engine = Pdf();
