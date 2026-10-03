@@ -263,6 +263,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     if (!_foreground ||
         _disposed ||
         _capturing ||
+        _confirmingExit ||
         controller == null ||
         !controller.value.isInitialized) {
       return;

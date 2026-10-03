@@ -16,9 +16,11 @@ void main() {
       final page = await store.append(Uint8List.fromList([1, 2, 3]));
       final output = await File('${root.path}/Scan.pdf').writeAsString('complete');
       await store.rememberOutput([page.path], output);
+      final partial = await File('${page.parent.path}/failed.jpg.pending').writeAsString('partial capture');
       final restarted = ScanDraftStore(directoryProvider: () async => root);
       final drafts = await restarted.recover();
       expect(drafts.single, [page.path]);
+      expect(await partial.exists(), isFalse);
       expect((await restarted.completedOutput(drafts.single))!.path, output.path);
       await restarted.discard(drafts.single);
       expect(await page.exists(), isFalse);

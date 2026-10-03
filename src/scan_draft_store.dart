@@ -9,6 +9,7 @@ class ScanDraftStore {
       : _directoryProvider = directoryProvider ?? getApplicationDocumentsDirectory;
   final Future<Directory> Function() _directoryProvider;
   Directory? _session;
+  static final Set<String> _writing = {};
 
   Future<File> append(Uint8List bytes) async {
     final root = await _directoryProvider();
@@ -16,8 +17,14 @@ class ScanDraftStore {
     await session.create(recursive: true);
     final file = File('${session.path}/${DateTime.now().microsecondsSinceEpoch}.jpg');
     final pending = File('${file.path}.pending');
-    await pending.writeAsBytes(bytes, flush: true);
-    return pending.rename(file.path);
+    _writing.add(pending.path);
+    try {
+      await pending.writeAsBytes(bytes, flush: true);
+      return await pending.rename(file.path);
+    } catch (_) {
+      await ScanTempSession().deletePath(pending.path);
+      rethrow;
+    } finally { _writing.remove(pending.path); }
   }
 
   Future<List<List<String>>> recover() async {
@@ -26,6 +33,11 @@ class ScanDraftStore {
     final result = <List<String>>[];
     await for (final session in root.list(followLinks: false)) {
       if (session is! Directory) continue;
+      await for (final file in session.list(followLinks: false)) {
+        if (file is File && file.path.endsWith('.pending') && !_writing.contains(file.path)) {
+          await ScanTempSession().deletePath(file.path);
+        }
+      }
       final pages = [await for (final file in session.list(followLinks: false))
         if (file is File && file.path.endsWith('.jpg')) file.path]..sort();
       if (pages.isNotEmpty) result.add(pages);
@@ -50,6 +62,8 @@ class ScanDraftStore {
 
   Future<void> rememberOutput(List<String> pages, File output) async {
     final receipt = File('${File(pages.first).parent.path}/output.txt');
-    await receipt.writeAsString(output.path, flush: true);
+    final pending = File('${receipt.path}.pending');
+    await pending.writeAsString(output.path, flush: true);
+    await pending.rename(receipt.path);
   }
 }
