@@ -65,3 +65,25 @@ cancellation between 16 KiB writes, including PDFBox's incremental source copy;
 verification also checks during text-position processing. A pending OS write or
 PDF parser work between checkpoints can still take time; this is not a hard
 wall-clock cancellation deadline. Repeat and confirm a subsequent save succeeds.
+
+
+## 0.4.0 workbook feature checks
+
+- Auto capture: hold a page for less than 1.4 seconds (no capture), then keep it
+  still; cancel crop and confirm a fresh hold retries automatically. Move the
+  phone during the hold and confirm the countdown resets.
+- Crop: test a 12MP photo, all four corners and edges, PIP zoom focus, invalid
+  crossed corners, Detect again and Full photo. Check exported pixel dimensions
+  and small-print clarity; output is capped at 4096px without upscaling.
+- OCR preview: open viewer on page 2, tap Scan/copy, select visible lines and paste
+  into another app. Test zoom, manual model override, auto detection, blank pages,
+  cancellation and a password-protected source.
+- Screenshot conversion: include very tall, wide and mixed images. PDF page
+  ratios match the source, and a damaged later image leaves no partial output.
+- Signatures: save two names, kill/relaunch, reuse each on different pages,
+  delete one, then verify the other still loads. Test a long Unicode name and
+  low storage during saving.
+- Page selection: select 1, 3 and 10 from a 1000-page file. Output has exactly
+  three pages in source order; scrolling must not render all page thumbnails.
+- Appearance: select Dark and check true black background, text contrast, rounded
+  glass cards and performance on a low-end phone. Test the signature keyboard.

@@ -40,6 +40,10 @@ void registerUnicodeOverlayCases() {
       final engine = Pdf();
       PdfDoc? result;
       try {
+        final preview = await service.recognizePage(source, 0);
+        expect(preview.script, TextRecognitionScript.devanagiri);
+        expect(preview.text.text.replaceAll(RegExp(r'\s+'), ''), contains('नमस्तेभारत'));
+        expect(await service.detectOcrScript(source), TextRecognitionScript.devanagiri);
         final output = await service.makeSearchablePdf(
           source,
           script: TextRecognitionScript.devanagiri,
