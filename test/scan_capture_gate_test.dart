@@ -22,6 +22,16 @@ void main() {
     }
     expect(captures, 1);
   });
+  test('slow cumulative camera movement never completes a stable hold', () {
+    final gate = ScanCaptureGate();
+    for (var i = 0; i < 20; i++) {
+      final delta = i * .004;
+      final drifting = corners.copyWith(
+        topLeft: (x: .1 + delta, y: .1), topRight: (x: .9 + delta, y: .1),
+        bottomRight: (x: .9 + delta, y: .9), bottomLeft: (x: .1 + delta, y: .9));
+      expect(gate.add(DetectionSuccess(drifting), Duration(milliseconds: i * 100)), isFalse);
+    }
+  });
   test('missing document and detector gaps restart the hold', () {
     final gate = ScanCaptureGate();
     for (var i = 0; i < 13; i++) { gate.add(const DetectionSuccess(corners), Duration(milliseconds: i * 100)); }

@@ -30,7 +30,9 @@ class ScanCaptureGate {
       if (List.generate(4, (i) => (a[i].x - b[i].x).abs() > .025 ||
           (a[i].y - b[i].y).abs() > .025).any((moved) => moved)) reset();
     }
-    _last = corners;
+    // Compare against the start of the hold, so slow cumulative drift cannot
+    // look stable merely because consecutive frames moved only a little.
+    _last ??= corners;
     final state = _analyzer.addEvent(event);
     status = state.status == AutoCaptureStatus.ready ? AutoCaptureStatus.detecting : state.status;
     if (state.steadyFrames < 2) _since = now;
