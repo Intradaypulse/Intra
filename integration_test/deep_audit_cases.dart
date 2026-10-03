@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart' as pf;
@@ -52,10 +53,16 @@ void registerDeepAuditCases() {
         expect(text, contains('Invoiceनमस्ते中文日本語한국어𠀀😀'));
         expect(await service.renderPage(output, i), await service.renderPage(source, i));
         final hit = (await after.search(query: 'Invoice', pages: PdfPages.single(i))).single;
-        // Anchor should follow the crop-origin/inverse-rotation transform.
-        final expected = [(130.0, 520.0), (180.0, 230.0), (370.0, 280.0), (320.0, 570.0)][i];
-        expect(hit.rect.x, inInclusiveRange(expected.$1 - 70, expected.$1 + 25));
-        expect(hit.rect.y, inInclusiveRange(expected.$2 - 70, expected.$2 + 25));
+        // Search exposes displayed MediaBox coordinates after the PDF page rotation.
+        final expected = [(130.0, 520.0), (230.0, 420.0), (230.0, 520.0), (230.0, 320.0)][i];
+        // Search returns the whole text span, not the substring's box. At
+        // rotation changes the returned coordinate frame; check that the
+        // known displayed baseline anchor lies in the span instead.
+        expect(hit.rect.x, lessThanOrEqualTo(expected.$1 + 2));
+        expect(hit.rect.right, greaterThanOrEqualTo(expected.$1 - 2));
+        expect(hit.rect.y, lessThanOrEqualTo(expected.$2 + 2));
+        expect(hit.rect.bottom, greaterThanOrEqualTo(expected.$2 - 2));
+        expect(hit.rect.width * hit.rect.height, lessThan(180 * 30));
       }
     } finally {
       await editor?.dispose(); await before?.dispose(); await after?.dispose();
@@ -78,9 +85,17 @@ void registerDeepAuditCases() {
         build: (_) => pw.Stack(children: [pw.Positioned(left: 150, top: 200,
           child: pw.SizedBox(width: 300, height: 150,
             child: pw.Image(pw.MemoryImage(base64Decode(hindiScanBase64)))))])));
+      final turned = img.copyRotate(img.decodeImage(base64Decode(hindiScanBase64))!, angle: -90);
+      pdf.addPage(pw.Page(pageFormat: const pf.PdfPageFormat(600, 800), margin: pw.EdgeInsets.zero,
+        build: (_) => pw.Stack(children: [pw.Positioned(left: 225, top: 150,
+          child: pw.SizedBox(width: 150, height: 300,
+            child: pw.Image(pw.MemoryImage(img.encodePng(turned)))))])));
       final raw = await File('${docs.path}/raw.pdf').writeAsBytes(await pdf.save());
       editor = await engine.edit(FileSource(raw));
-      await editor.setPageCropBox(0, const PdfRect(x: 100, y: 350, width: 400, height: 300));
+      for (var page = 0; page < 2; page++) {
+        await editor.setPageCropBox(page, const PdfRect(x: 100, y: 350, width: 400, height: 300));
+        await editor.setPageRotation(page, degrees: page * 90);
+      }
       final source = File('${docs.path}/crop.pdf');
       final sink = await FileSink.create(source);
       try { await editor.save(sink); } finally { await sink.close(); }
@@ -91,10 +106,15 @@ void registerDeepAuditCases() {
       expect(hits, hasLength(1));
       expect(hits.single.rect.x, closeTo(175, 15));
       expect(hits.single.rect.y, inInclusiveRange(500, 580));
-      expect(await service.renderPage(output, 0), await service.renderPage(source, 0));
+      for (var page = 0; page < 2; page++) {
+        expect(await service.renderPage(output, page), await service.renderPage(source, page));
+        expect('नमस्ते'.allMatches(await result.extract(pages: PdfPages.single(page))).length, 1);
+      }
       final second = await service.makeSearchablePdf(output, script: TextRecognitionScript.devanagiri);
       await result.dispose(); result = await engine.open(FileSource(second));
-      expect('नमस्ते'.allMatches(await result.extract(pages: PdfPages.single(0))).length, 1);
+      for (var page = 0; page < 2; page++) {
+        expect('नमस्ते'.allMatches(await result.extract(pages: PdfPages.single(page))).length, 1);
+      }
     } finally {
       await editor?.dispose(); await result?.dispose(); await engine.dispose();
       await root.delete(recursive: true);

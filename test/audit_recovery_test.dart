@@ -46,6 +46,19 @@ void main() {
     expect(signaturePdfRect(view, 600, 800, 90), const Rect.fromLTWH(20, 10, 40, 100));
     expect(signaturePdfRect(view, 600, 800, 180), const Rect.fromLTWH(490, 20, 100, 40));
     expect(signaturePdfRect(view, 600, 800, 270), const Rect.fromLTWH(540, 690, 40, 100));
+    expect(signaturePdfRect(view, 600, 800, -90), signaturePdfRect(view, 600, 800, 270));
+    expect(signaturePdfRect(view, 600, 800, 450), signaturePdfRect(view, 600, 800, 90));
+  });
+
+  test('OCR dedup coordinates follow the pinned search engine reading frame', () {
+    const media = Rect.fromLTWH(0, 0, 600, 800);
+    expect(ocrSearchPoint(const Offset(130, 520), media, 0, 0), const Offset(130, 520));
+    expect(ocrSearchPoint(const Offset(180, 230), media, 90, 0), const Offset(230, 420));
+    expect(ocrSearchPoint(const Offset(370, 280), media, 180, 0), const Offset(230, 520));
+    expect(ocrSearchPoint(const Offset(320, 570), media, -90, 0), const Offset(230, 320));
+    expect(ocrSearchPoint(const Offset(180, 230), media, 90, 90), const Offset(180, 230));
+    expect(ocrSearchPoint(const Offset(200, 260), const Rect.fromLTWH(20, 30, 600, 800), 90, 0),
+      const Offset(250, 450));
   });
 
   testWidgets('unprotected export requires explicit approval and can be cancelled', (tester) async {

@@ -1361,6 +1361,7 @@ class PdfService {
         }
         final info = doc.pages[index];
         final visible = await _visibleBox(boxes, index);
+        final media = await boxes.pageMediaBox(index);
         final viewWidth = info.rotation % 180 == 0 ? visible.width : visible.height;
         final viewHeight = info.rotation % 180 == 0 ? visible.height : visible.width;
         final existing = await doc.extract(pages: PdfPages.single(index));
@@ -1371,6 +1372,12 @@ class PdfService {
           if (word.text.trim().isEmpty) continue;
           final box = word.boundingBox;
           if (box.width <= 0 || box.height <= 0) continue;
+          final geometry = ocrWordGeometry(
+            text: word.text, corners: word.cornerPoints,
+            left: box.left, top: box.top, width: box.width, height: box.height,
+            scaleX: viewWidth / image.width, scaleY: viewHeight / image.height,
+            angle: word.angle ?? 0,
+          );
           if (existing.trim().isNotEmpty) {
             final matches = existingMatches[word.text] ??= await doc.search(
               query: word.text,
@@ -1381,8 +1388,12 @@ class PdfService {
               Rect.fromLTWH(box.center.dx * viewWidth / image.width,
                 box.center.dy * viewHeight / image.height, 0, 0),
               visible.width, visible.height, info.rotation);
-            final cx = center.left + visible.x;
-            final cy = center.top + visible.y;
+            final searchPoint = ocrSearchPoint(
+              Offset(center.left + visible.x, center.top + visible.y),
+              Rect.fromLTWH(media.x, media.y, media.width, media.height),
+              info.rotation, (geometry['angle'] as num).toDouble());
+            final cx = searchPoint.dx;
+            final cy = searchPoint.dy;
             if (matches.any(
               (m) =>
                   cx >= m.rect.x &&
@@ -1393,19 +1404,7 @@ class PdfService {
               continue;
             }
           }
-          words.add(
-            ocrWordGeometry(
-              text: word.text,
-              corners: word.cornerPoints,
-              left: box.left,
-              top: box.top,
-              width: box.width,
-              height: box.height,
-              scaleX: viewWidth / image.width,
-              scaleY: viewHeight / image.height,
-              angle: word.angle ?? 0,
-            ),
-          );
+          words.add(geometry);
         }
         writer.writeln(jsonEncode({'page': index, 'words': words}));
         await writer.flush();
