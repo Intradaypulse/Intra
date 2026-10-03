@@ -389,6 +389,26 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     });
   }
 
+  Future<void> _editPages(List<File> pages, {File? removed}) async {
+    if (_capturing || _confirmingExit) return;
+    setState(() => _capturing = true);
+    try {
+      final paths = pages.map((page) => page.path).toList();
+      if (removed == null) {
+        await _drafts.persistOrder(paths);
+      } else {
+        await _drafts.removePage(paths, removed.path);
+        _tempSession.forget(removed.path);
+      }
+      if (!mounted) return;
+      setState(() { _pages.clear(); _pages.addAll(pages); });
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Could not update scan pages: $error');
+    } finally {
+      if (mounted) setState(() => _capturing = false);
+    }
+  }
+
   Future<void> _teardown() => _queueCamera(_teardownCamera);
 
   Future<void> _teardownCamera() async {
@@ -535,10 +555,11 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                       padding: const EdgeInsets.all(8),
                       itemCount: _pages.length,
                       onReorderItem: (oldIndex, newIndex) {
-                        setState(() {
-                          final page = _pages.removeAt(oldIndex);
-                          _pages.insert(newIndex, page);
-                        });
+                        if (_capturing) return;
+                        final reordered = List<File>.from(_pages);
+                        final page = reordered.removeAt(oldIndex);
+                        reordered.insert(newIndex, page);
+                        unawaited(_editPages(reordered));
                       },
                       itemBuilder: (context, index) {
                         return Container(
@@ -566,11 +587,10 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                                   child: InkWell(
                                     customBorder: const CircleBorder(),
                                     onTap: () {
+                                      if (_capturing) return;
                                       final page = _pages[index];
-                                      setState(() => _pages.removeAt(index));
-                                      unawaited(
-                                        _tempSession.deletePath(page.path),
-                                      );
+                                      final remaining = List<File>.from(_pages)..removeAt(index);
+                                      unawaited(_editPages(remaining, removed: page));
                                     },
                                     child: const Padding(
                                       padding: EdgeInsets.all(4),

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'unicode_overlay_cases.dart';
+import 'deep_audit_cases.dart';
 
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -18,6 +19,7 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   registerUnicodeOverlayCases();
+  registerDeepAuditCases();
 
   testWidgets(
     'app boots, settings and camera lifecycle work',

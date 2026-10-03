@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
+import 'output_protection.dart';
 
 enum SplitMode { everyPage, everyN, custom, selected }
 
@@ -202,6 +203,9 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
     });
 
     try {
+      if (_password != null || widget.service.wasProtected(source)) {
+        if (!await confirmUnprotectedOutput(context) || !mounted) return;
+      }
       late final List<File> outputs;
       switch (_mode) {
         case SplitMode.everyPage:

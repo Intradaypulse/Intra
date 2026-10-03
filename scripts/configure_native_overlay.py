@@ -1,7 +1,17 @@
 """Install the reviewed Android bridge in the generated Flutter project."""
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 root = Path('buildapp')
+# Pin the font compiler; build original Unicode identity fonts before pub get.
+try:
+    import fontTools
+    assert fontTools.__version__ == '4.61.1'
+except (ImportError, AssertionError):
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'fonttools==4.61.1'])
+subprocess.check_call([sys.executable, 'scripts/build_ocr_fonts.py',
+                       str(root / 'assets/fonts')])
 target = root / 'android/app/src/main/kotlin/com/pdfmateapp/pdfmate/MainActivity.kt'
 target.parent.mkdir(parents=True, exist_ok=True)
 shutil.copyfile('android_native/MainActivity.kt', target)

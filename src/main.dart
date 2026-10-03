@@ -24,6 +24,7 @@ import 'file_store.dart';
 import 'live_scanner_screen.dart';
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
+import 'pdf_password_dialog.dart';
 import 'pdf_viewer.dart';
 import 'scan_draft_store.dart';
 
@@ -264,7 +265,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _recoverFiles() async {
     try {
       final outputs = await _service.recoverableOutputs();
-      await _store.addMany([for (final file in outputs)
+      await _store.recoverMissing([for (final file in outputs)
         PdfRecord(path: file.path, name: file.uri.pathSegments.last,
           createdAt: await file.lastModified())]);
       await _loadFiles();
@@ -483,9 +484,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted || _busy) return;
     setState(() => _busy = true);
     try {
+      final destination = await _scanDrafts.reserveOutput(pages);
       final output = await _scanDrafts.completedOutput(pages) ??
-          await _service.createScannedPdfFromFiles(pages);
-      await _scanDrafts.rememberOutput(pages, output);
+          await _service.createScannedPdfFromFiles(pages, destination: destination);
       await _register(output);
       await _scanDrafts.discard(pages);
       if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
@@ -637,7 +638,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _busy = true);
     File? textFile;
     try {
-      final result = await _service.extractPdfTextToFile();
+      final result = await _service.extractPdfTextToFile(requestPassword: (wrong) async {
+        if (!mounted) return null;
+        return askPdfPassword(context,
+          title: wrong ? 'Wrong password. Try again' : 'PDF password');
+      });
       if (result == null) return;
       textFile = result.$1;
       final text = result.$2;
@@ -662,8 +667,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 try {
                   await SharePlus.instance.share(ShareParams(files: [XFile(textFile!.path)]));
                 } catch (error) {
-                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Sharing failed. Please retry: $error')));
+                  if (context.mounted) { ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
                 }
               },
               icon: const Icon(Icons.share_outlined),
@@ -704,7 +709,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'));
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error')));
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
     } finally { _externalAction = false; }
   }
 

@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'ads_service.dart';
 import 'pdf_service.dart';
+import 'pdf_password_dialog.dart';
 import 'pdf_rules.dart';
 import 'ocr_languages.dart';
 import 'ocr_page_preview_screen.dart';
@@ -46,37 +47,10 @@ class _OcrScreenState extends State<OcrScreen> {
     TextRecognitionScript.korean => 'Korean',
   };
 
-  Future<String?> _askPassword() async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('PDF password'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Open'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return value;
-  }
+  Future<String?> _askPassword({bool owner = false, bool wrong = false}) =>
+      askPdfPassword(context,
+        title: owner ? (wrong ? 'Wrong owner password. Try again' : 'Owner password required') : 'PDF password',
+        label: owner ? 'Owner password' : 'Password');
 
   Future<void> _pick() async {
     if (_busy) return;
@@ -397,6 +371,24 @@ class _OcrScreenState extends State<OcrScreen> {
       },
     );
     try {
+      var candidatePassword = _password;
+      while (true) {
+        try {
+          await widget.service.checkOcrPermission(source, password: candidatePassword);
+          _password = candidatePassword;
+          break;
+        } on PlatformException catch (error) {
+          if (error.code != 'OCR_OWNER_PASSWORD_REQUIRED' && error.code != 'OCR_WRONG_PASSWORD') rethrow;
+          if (!mounted) return;
+          final password = await _askPassword(owner: true, wrong: error.code == 'OCR_WRONG_PASSWORD');
+          if (password == null) {
+            if (mounted) setState(() => _status = 'Cancelled.');
+            return;
+          }
+          candidatePassword = password;
+        }
+      }
+      if (!mounted) return;
       await _resolveLanguage(source);
       final output = await widget.service.makeSearchablePdf(
         source,
@@ -581,8 +573,8 @@ class _OcrScreenState extends State<OcrScreen> {
                           try {
                             await SharePlus.instance.share(ShareParams(files: [XFile(_textFile!.path)]));
                           } catch (error) {
-                            if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Sharing failed. Please retry: $error')));
+                            if (context.mounted) { ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
                           }
                         },
                       ),

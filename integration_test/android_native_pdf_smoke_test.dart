@@ -47,6 +47,13 @@ void main() {
       );
       expect(await compressed.file.exists(), isTrue);
       expect(await service.pageCount(compressed.file), 4);
+      expect((await service.recoverableOutputs()).map((f) => f.path),
+        isNot(contains(compressed.file.path)));
+      final savedCompression = await service.publishCompressionPreview(compressed.file);
+      expect(await compressed.file.exists(), isFalse);
+      expect(await service.pageCount(savedCompression), 4);
+      expect((await service.recoverableOutputs()).map((f) => f.path),
+        contains(savedCompression.path));
 
       final parts = await service.splitEveryN(
         protected,

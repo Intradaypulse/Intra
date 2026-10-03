@@ -192,6 +192,17 @@ class PdfFileStore {
     await _save(items);
   });
 
+  /// Startup recovery adds missing outputs without changing existing metadata.
+  Future<void> recoverMissing(List<PdfRecord> records) => _mutations.run(() async {
+    final items = await _load();
+    final known = items.map((item) => item.path).toSet();
+    final missing = [for (final record in records)
+      if (known.add(record.path)) record];
+    if (missing.isEmpty) return;
+    items.addAll(missing);
+    await _save(items);
+  });
+
   Future<void> remove(String path) => _mutations.run(() async {
     final items = await _load();
     items.removeWhere((e) => e.path == path);

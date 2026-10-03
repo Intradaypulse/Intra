@@ -29,7 +29,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
     unawaited(widget.service.secureDeleteTemporary(_source));
     final result = _result;
     if (!_outputHandedOff && result != null) {
-      unawaited(result.file.delete().then((_) {}, onError: (Object _) {}));
+      unawaited(widget.service.secureDeleteTemporary(result.file));
     }
     super.dispose();
   }
@@ -112,7 +112,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
         await widget.service.secureDeleteTemporary(previous);
       }
       if (previousResult != null && !_outputHandedOff) {
-        try { await previousResult.file.delete(); } catch (_) {}
+        await widget.service.secureDeleteTemporary(previousResult.file);
       }
     } catch (error) {
       if (mounted) {
@@ -145,7 +145,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
       _result = null;
     });
     if (oldResult != null) {
-      try { await oldResult.file.delete(); } catch (_) {}
+      await widget.service.secureDeleteTemporary(oldResult.file);
     }
 
     try {
@@ -155,7 +155,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
         password: _password,
       );
       if (!mounted) {
-        await result.file.delete();
+        await widget.service.secureDeleteTemporary(result.file);
         return;
       }
       setState(() => _result = result);
@@ -297,10 +297,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
                       ],
                       const SizedBox(height: 16),
                       FilledButton(
-                        onPressed: () {
-                          _outputHandedOff = true;
-                          Navigator.of(context).pop<File>(result.file);
-                        },
+                        onPressed: _busy ? null : _save,
                         child: const Text('Save to My PDFs'),
                       ),
                     ],
@@ -312,6 +309,24 @@ class _CompressionScreenState extends State<CompressionScreen> {
         ),
       ),
     ));
+  }
+
+  Future<void> _save() async {
+    final result = _result;
+    if (_busy || result == null) return;
+    setState(() => _busy = true);
+    try {
+      final output = await widget.service.publishCompressionPreview(result.file);
+      _outputHandedOff = true;
+      if (mounted) Navigator.of(context).pop<File>(output);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save PDF. Please retry: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 }
 

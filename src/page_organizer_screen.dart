@@ -7,6 +7,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
+import 'output_protection.dart';
 
 class _PageItem {
   _PageItem({required this.originalIndex});
@@ -192,7 +193,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
 
   Future<void> _save() async {
     final source = _source;
-    if (source == null || _pages.isEmpty) return;
+    if (_busy || source == null || _pages.isEmpty) return;
 
     setState(() {
       _busy = true;
@@ -200,6 +201,9 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
     });
 
     try {
+      if (_password != null || widget.service.wasProtected(source)) {
+        if (!await confirmUnprotectedOutput(context) || !mounted) return;
+      }
       final output = await widget.service.organizePdf(
         source,
         pageOrder: [for (final page in _pages) page.originalIndex],
