@@ -10,6 +10,8 @@ import 'package:share_plus/share_plus.dart';
 import 'ads_service.dart';
 import 'pdf_service.dart';
 import 'pdf_rules.dart';
+import 'ocr_languages.dart';
+import 'ocr_page_preview_screen.dart';
 import 'telemetry_service.dart';
 
 class OcrScreen extends StatefulWidget {
@@ -25,6 +27,7 @@ class _OcrScreenState extends State<OcrScreen> {
   File? _source;
   PdfOperationControl? _operation;
   TextRecognitionScript _script = TextRecognitionScript.latin;
+  OcrLanguage _language = ocrLanguages.first;
   bool _busy = false;
   int _pageCount = 0;
   bool _heavyUnlocked = false;
@@ -149,10 +152,11 @@ class _OcrScreenState extends State<OcrScreen> {
         if (mounted) setState(() => _busy = false);
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Could not choose PDF: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -248,9 +252,20 @@ class _OcrScreenState extends State<OcrScreen> {
     }
   }
 
+  Future<void> _resolveLanguage(File source) async {
+    final script = _language.script;
+    if (script != null) { _script = script; return; }
+    setState(() => _status = 'Detecting the document script…');
+    _script = await widget.service.detectOcrScript(source,
+      password: _password, control: _operation);
+    if (mounted) setState(() => _status = 'Detected ${_scriptLabel(_script)}. Processing…');
+  }
+
   Future<void> _extract() async {
     final source = _source;
-    if (source == null) return;
+    if (source == null || _busy) return;
+    setState(() => _busy = true);
+    try {
     if (!await _ensureLargeOcrUnlocked() || !mounted) return;
 
     setState(() {
@@ -261,15 +276,17 @@ class _OcrScreenState extends State<OcrScreen> {
 
     _operation = PdfOperationControl(
       onProgress: (completed, total) {
-        if (mounted)
+        if (mounted) {
           setState(
             () => _status = 'Processing page ${completed + 1} of $total…',
           );
+        }
       },
     );
     File? textFile;
     IOSink? writer;
     try {
+      await _resolveLanguage(source);
       textFile = await widget.service.newTemporaryTextFile();
       writer = textFile.openWrite();
       final preview = StringBuffer();
@@ -323,6 +340,11 @@ class _OcrScreenState extends State<OcrScreen> {
       _operation = null;
       if (mounted) setState(() => _busy = false);
     }
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Could not start OCR: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<bool> _confirmSignedPdfModification() async {
@@ -354,7 +376,9 @@ class _OcrScreenState extends State<OcrScreen> {
 
   Future<void> _makeSearchable() async {
     final source = _source;
-    if (source == null) return;
+    if (source == null || _busy) return;
+    setState(() => _busy = true);
+    try {
     if (!await _ensureLargeOcrUnlocked() || !mounted) return;
     if (!await _confirmSignedPdfModification() || !mounted) return;
 
@@ -365,13 +389,15 @@ class _OcrScreenState extends State<OcrScreen> {
 
     _operation = PdfOperationControl(
       onProgress: (completed, total) {
-        if (mounted)
+        if (mounted) {
           setState(
             () => _status = 'Processing page ${completed + 1} of $total…',
           );
+        }
       },
     );
     try {
+      await _resolveLanguage(source);
       final output = await widget.service.makeSearchablePdf(
         source,
         script: _script,
@@ -396,6 +422,11 @@ class _OcrScreenState extends State<OcrScreen> {
       }
     } finally {
       _operation = null;
+      if (mounted) setState(() => _busy = false);
+    }
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Could not start OCR: $e');
+    } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -424,7 +455,7 @@ class _OcrScreenState extends State<OcrScreen> {
                 child: ListTile(
                   leading: const Icon(Icons.document_scanner_outlined),
                   title: Text(
-                    _source?.uri.pathSegments.last ?? 'No PDF selected',
+                    (_source == null ? null : widget.service.displayName(_source!)) ?? 'No PDF selected',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -436,25 +467,17 @@ class _OcrScreenState extends State<OcrScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<TextRecognitionScript>(
-                initialValue: _script,
-                decoration: const InputDecoration(
-                  labelText: 'OCR script / language family',
-                  border: OutlineInputBorder(),
-                ),
-                items: [
-                  for (final script in TextRecognitionScript.values)
-                    DropdownMenuItem(
-                      value: script,
-                      child: Text(_scriptLabel(script)),
-                    ),
-                ],
-                onChanged: _busy
-                    ? null
-                    : (value) {
-                        if (value != null) setState(() => _script = value);
-                      },
+              DropdownButtonFormField<OcrLanguage>(
+                initialValue: _language, isExpanded: true,
+                decoration: const InputDecoration(labelText: 'OCR language'),
+                items: [for (final language in ocrLanguages)
+                  DropdownMenuItem(value: language, child: Text(language.name))],
+                onChanged: _busy ? null : (value) => setState(() {
+                  _language = value!;
+                  _script = value.script ?? TextRecognitionScript.latin;
+                }),
               ),
+              const Text('Auto samples the first, middle and last page to select the dominant script. For mixed scripts, choose a language manually. Language names share their script model.'),
               const SizedBox(height: 10),
               DropdownButtonFormField<bool>(
                 initialValue: _tableRows,
@@ -485,6 +508,14 @@ class _OcrScreenState extends State<OcrScreen> {
                   style: TextStyle(fontWeight: FontWeight.w600),
                 ),
               ],
+              OutlinedButton.icon(
+                onPressed: _source == null || _busy ? null : () async {
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => OcrPagePreviewScreen(
+                    service: widget.service, source: _source!, pageCount: _pageCount,
+                    password: _password, script: _language.script)));
+                },
+                icon: const Icon(Icons.document_scanner_outlined), label: const Text('Preview & copy text'),
+              ),
               const SizedBox(height: 18),
               Row(
                 children: [

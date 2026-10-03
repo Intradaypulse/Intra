@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:image/image.dart' as img;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
@@ -13,7 +14,25 @@ final class _PickedFile extends PlatformFile {
   @override
   final String path;
   @override
+  String get name => File(path).uri.pathSegments.last;
+  @override
   Future<Uint8List> readAsBytes() => File(path).readAsBytes();
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _CloudFile extends PlatformFile {
+  @override
+  String? get path => null;
+  @override
+  String get name => 'cloud.pdf';
+  @override
+  Future<Uint8List> readAsBytes() => throw StateError('Whole-file reads forbidden');
+  @override
+  Stream<Uint8List> readAsByteStream() async* {
+    yield Uint8List.fromList([1, 2]);
+    yield Uint8List.fromList([3, 4]);
+  }
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -61,6 +80,30 @@ void main() {
     await file.writeAsBytes(await doc.save(), flush: true);
     return file;
   }
+
+  test('pathless cloud picker streams without whole-file allocation', () async {
+    final picker = _PickerService(docs, temp, [_CloudFile()]);
+    final files = await picker.pickPdfFiles();
+    expect(await files.single.readAsBytes(), [1, 2, 3, 4]);
+    await picker.secureDeleteTemporary(files.single);
+  });
+
+  test('failed compression removes its incomplete output', () async {
+    final invalid = await File('${docs.path}/invalid.pdf').writeAsString('invalid');
+    final before = (await docs.list().toList()).map((e) => e.path).toSet();
+    await expectLater(service.compressAdvanced(invalid, CompressionPreset.balanced), throwsA(anything));
+    expect((await docs.list().toList()).map((e) => e.path).toSet(), before);
+  });
+
+  test('managed picker copies retain original display names', () async {
+    final source = await createThreePagePdf();
+    final picker = _PickerService(docs, temp, [_PickedFile(source.path)]);
+    final files = await picker.pickPdfFiles();
+    expect(files.single.path, isNot(source.path));
+    expect(picker.displayName(files.single), 'source.pdf');
+    await picker.secureDeleteTemporary(files.single);
+    expect(await source.exists(), isTrue);
+  });
 
   test(
     'organizer removes work and partial output when extraction fails',
@@ -342,79 +385,7 @@ void main() {
 
   test('scanner temporary page files are deleted after PDF assembly', () async {
     final page = File('${temp.path}/pdfmate_scan_fixture.png');
-    await page.writeAsBytes(const <int>[
-      137,
-      80,
-      78,
-      71,
-      13,
-      10,
-      26,
-      10,
-      0,
-      0,
-      0,
-      13,
-      73,
-      72,
-      68,
-      82,
-      0,
-      0,
-      0,
-      1,
-      0,
-      0,
-      0,
-      1,
-      8,
-      6,
-      0,
-      0,
-      0,
-      31,
-      21,
-      196,
-      137,
-      0,
-      0,
-      0,
-      13,
-      73,
-      68,
-      65,
-      84,
-      8,
-      215,
-      99,
-      248,
-      207,
-      192,
-      240,
-      31,
-      0,
-      5,
-      0,
-      1,
-      255,
-      137,
-      153,
-      61,
-      29,
-      0,
-      0,
-      0,
-      0,
-      73,
-      69,
-      78,
-      68,
-      174,
-      66,
-      96,
-      130,
-    ], flush: true);
-
+    await page.writeAsBytes(img.encodePng(img.Image(width: 24, height: 48)));
     final output = await service.createScannedPdfFromFiles([page.path]);
     expect(await output.exists(), isTrue);
     expect(await page.exists(), isFalse);

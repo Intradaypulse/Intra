@@ -7,6 +7,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'advanced_merge_screen.dart';
+import 'app_theme.dart';
 import 'advanced_split_screen.dart';
 import 'compression_screen.dart';
 import 'ocr_screen.dart';
@@ -43,16 +44,19 @@ Future<void> _initializeTelemetry() async {
 }
 
 class PDFMateApp extends StatefulWidget {
-  const PDFMateApp({super.key});
+  const PDFMateApp({super.key, this.settingsStore});
+  final AppSettingsStore? settingsStore;
 
   @override
   State<PDFMateApp> createState() => _PDFMateAppState();
 }
 
 class _PDFMateAppState extends State<PDFMateApp> {
-  final AppSettingsStore _settings = AppSettingsStore();
+  late final AppSettingsStore _settings = widget.settingsStore ?? AppSettingsStore();
 
   bool _ready = false;
+  bool _loadingSettings = false;
+  String? _settingsError;
   bool _onboardingComplete = false;
   bool _autoSaveDownloads = true;
   ThemeMode _themeMode = ThemeMode.system;
@@ -64,18 +68,27 @@ class _PDFMateAppState extends State<PDFMateApp> {
   }
 
   Future<void> _loadSettings() async {
-    final values = await Future.wait<Object>([
-      _settings.loadThemeMode(),
-      _settings.loadAutoSaveDownloads(),
-      _settings.isOnboardingComplete(),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _themeMode = values[0] as ThemeMode;
-      _autoSaveDownloads = values[1] as bool;
-      _onboardingComplete = values[2] as bool;
-      _ready = true;
-    });
+    if (_loadingSettings) return;
+    _loadingSettings = true;
+    if (mounted) setState(() => _settingsError = null);
+    try {
+      final values = await Future.wait<Object>([
+        _settings.loadThemeMode(),
+        _settings.loadAutoSaveDownloads(),
+        _settings.isOnboardingComplete(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _themeMode = values[0] as ThemeMode;
+        _autoSaveDownloads = values[1] as bool;
+        _onboardingComplete = values[2] as bool;
+        _ready = true;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _settingsError = 'Could not load settings.');
+    } finally {
+      _loadingSettings = false;
+    }
   }
 
   Future<void> _setTheme(ThemeMode mode) async {
@@ -98,24 +111,11 @@ class _PDFMateAppState extends State<PDFMateApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'PDFMate',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF315EF5),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFF7F8FC),
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6E8BFF),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: pdfMateTheme(Brightness.light),
+      darkTheme: pdfMateTheme(Brightness.dark),
       themeMode: _themeMode,
       home: !_ready
-          ? const _LaunchScreen()
+          ? _LaunchScreen(error: _settingsError, onRetry: _loadSettings)
           : !_onboardingComplete
           ? OnboardingScreen(onFinished: _finishOnboarding)
           : HomeScreen(
@@ -129,7 +129,9 @@ class _PDFMateAppState extends State<PDFMateApp> {
 }
 
 class _LaunchScreen extends StatelessWidget {
-  const _LaunchScreen();
+  const _LaunchScreen({this.error, required this.onRetry});
+  final String? error;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +162,10 @@ class _LaunchScreen extends StatelessWidget {
               ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 18),
-            const SizedBox(
+            if (error != null) ...[
+              Text(error!, textAlign: TextAlign.center),
+              TextButton(onPressed: onRetry, child: const Text('Retry')),
+            ] else const SizedBox(
               width: 28,
               height: 28,
               child: CircularProgressIndicator(strokeWidth: 3),
@@ -198,6 +203,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _search = TextEditingController();
 
   List<PdfRecord> _files = [];
+  String? _libraryError;
+  int _libraryLoadGeneration = 0;
   final Map<String, int> _fileSizes = {};
   final LruFutureCache<String, Uint8List?> _thumbnailFutures =
       LruFutureCache<String, Uint8List?>(capacity: 32);
@@ -251,43 +258,55 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadFiles() async {
-    final files = await _store.load();
-    final sizes = <String, int>{};
-    await Future.wait([
-      for (final record in files)
-        () async {
-          try {
-            sizes[record.path] = await File(record.path).length();
-          } catch (_) {
-            sizes[record.path] = 0;
-          }
-        }(),
-    ]);
+    final generation = ++_libraryLoadGeneration;
+    try {
+      final files = await _store.load();
+      final sizes = <String, int>{};
+      await Future.wait([
+        for (final record in files)
+          () async {
+            try {
+              sizes[record.path] = await File(record.path).length();
+            } catch (_) {
+              sizes[record.path] = 0;
+            }
+          }(),
+      ]);
 
-    // The cache is bounded; clear entries when the document list changes so
-    // renamed/deleted PDFs cannot leave stale thumbnail data behind.
-    _thumbnailFutures.clear();
+      // The cache is bounded; clear entries when the document list changes so
+      // renamed/deleted PDFs cannot leave stale thumbnail data behind.
+      if (!mounted || generation != _libraryLoadGeneration) return;
+      _thumbnailFutures.clear();
 
-    if (mounted) {
-      setState(() {
-        _files = files;
-        _fileSizes
-          ..clear()
-          ..addAll(sizes);
-      });
+      if (mounted && generation == _libraryLoadGeneration) {
+        setState(() {
+          _libraryError = null;
+          _files = files;
+          _fileSizes
+            ..clear()
+            ..addAll(sizes);
+        });
+      }
+    } catch (_) {
+      if (mounted && generation == _libraryLoadGeneration) {
+        setState(() => _libraryError = 'Could not load your PDF library.');
+      }
     }
   }
 
-  Future<Uint8List?> _loadThumbnail(String path) async {
+  Future<Uint8List?> _loadThumbnail(String path, PdfOperationControl control) async {
     try {
-      return await _service.renderFirstThumbnail(File(path), width: 150);
+      return await _service.renderFirstThumbnail(File(path), width: 150, control: control);
     } catch (_) {
       return null;
     }
   }
 
-  Future<Uint8List?> _thumbnail(String path) =>
-      _thumbnailFutures.getOrCreate(path, () => _loadThumbnail(path));
+  Future<Uint8List?> _thumbnail(String path) {
+    final control = PdfOperationControl();
+    return _thumbnailFutures.getOrCreate(path, () => _loadThumbnail(path, control),
+        onDiscard: control.cancel);
+  }
 
   String _formatFileSize(int bytes) {
     const kb = 1024;
@@ -297,9 +316,16 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$bytes B';
   }
 
+  final Set<String> _recordOperations = {};
+
   Future<void> _toggleFavorite(PdfRecord record) async {
+    if (!_recordOperations.add(record.path)) return;
+    try {
     await _store.setFavorite(record.path, !record.favorite);
     await _loadFiles();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not update favorite: $e')));
+    } finally { _recordOperations.remove(record.path); }
   }
 
   Future<void> _showDownloadsFailure(
@@ -420,8 +446,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (pagePaths == null || pagePaths.isEmpty) return;
 
-    setState(() => _busy = true);
     try {
+      if (!mounted) return;
+      setState(() => _busy = true);
       final output = await _service.createScannedPdfFromFiles(pagePaths);
       await _register(output);
       if (!mounted) return;
@@ -731,6 +758,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _delete(PdfRecord record) async {
+    if (!_recordOperations.add(record.path)) return;
+    try {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -753,6 +782,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (await file.exists()) await file.delete();
     await _store.remove(record.path);
     await _loadFiles();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete PDF: $e')));
+    } finally { _recordOperations.remove(record.path); }
   }
 
   List<PdfRecord> get _filtered {
@@ -828,6 +860,12 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 8, 18, 110),
                 children: [
+                  if (_libraryError != null)
+                    Card(child: ListTile(
+                      title: Text(_libraryError!),
+                      trailing: TextButton(onPressed: _loadFiles,
+                          child: const Text('Retry')),
+                    )),
                   Container(
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
@@ -1021,7 +1059,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  if (files.isEmpty)
+                  if (files.isEmpty && _libraryError == null)
                     Container(
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
@@ -1202,8 +1240,8 @@ class _ToolCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
+    return GlassSurface(child: Material(
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -1226,7 +1264,7 @@ class _ToolCard extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 

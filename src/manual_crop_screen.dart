@@ -6,6 +6,7 @@ import 'package:document_scan/document_scan.dart';
 import 'package:flutter/material.dart';
 
 import 'draggable_corner_overlay.dart';
+import 'crop_geometry.dart';
 
 class ManualCropResult {
   const ManualCropResult({
@@ -38,16 +39,17 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
   final _scanner = DocumentScanner();
 
   static const _fallback = DocumentCorners(
-    topLeft: (x: 0.08, y: 0.08),
-    topRight: (x: 0.92, y: 0.08),
-    bottomRight: (x: 0.92, y: 0.92),
-    bottomLeft: (x: 0.08, y: 0.92),
+    topLeft: (x: 0, y: 0),
+    topRight: (x: 1, y: 0),
+    bottomRight: (x: 1, y: 1),
+    bottomLeft: (x: 0, y: 1),
   );
 
   DocumentCorners? _corners;
   Size? _imageSize;
   bool _busy = true;
   String? _error;
+  int? _activeCorner;
   ScanFilter _filter = ScanFilter.enhance;
 
   @override
@@ -56,7 +58,7 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
     _prepare();
   }
 
-  Future<void> _prepare() async {
+  Future<void> _prepare({bool redetect = false}) async {
     setState(() {
       _busy = true;
       _error = null;
@@ -65,15 +67,15 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
       final size = await _decodeSize(widget.imagePath);
       if (size == null) throw StateError('The photo could not be opened.');
       final detected =
-          widget.initialCorners ??
+          (redetect ? null : widget.initialCorners) ??
           await _detector.detect(
             ScanInput.file(widget.imagePath),
-            sensitivity: DetectionSensitivity.lenient,
+            sensitivity: DetectionSensitivity.strict,
           );
       if (!mounted) return;
       setState(() {
         _imageSize = size;
-        _corners = detected ?? _fallback;
+        _corners = detected != null && validCropCorners(detected) ? detected : _fallback;
       });
     } catch (e) {
       if (mounted) setState(() => _error = 'Could not prepare photo: $e');
@@ -85,16 +87,13 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
   Future<Size?> _decodeSize(String path) async {
     try {
       final bytes = await File(path).readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
+      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       try {
-        final frame = await codec.getNextFrame();
-        final image = frame.image;
-        final size = Size(image.width.toDouble(), image.height.toDouble());
-        image.dispose();
-        return size;
-      } finally {
-        codec.dispose();
-      }
+        final descriptor = await ui.ImageDescriptor.encoded(buffer);
+        try { return Size(descriptor.width.toDouble(), descriptor.height.toDouble()); }
+        finally { descriptor.dispose(); }
+      } finally { buffer.dispose(); }
+
     } catch (_) {
       return null;
     }
@@ -115,14 +114,20 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
 
   Future<void> _confirm() async {
     final corners = _corners;
-    if (corners == null) return;
+    if (_busy || corners == null) return;
+    if (!validCropCorners(corners)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Keep corners in order and select a non-empty document area.')));
+      return;
+    }
     setState(() => _busy = true);
     try {
       final scan = await _scanner.scan(
         ScanInput.file(widget.imagePath),
         corners: corners,
         filter: _filter,
-        output: const ScanOutputFormat.jpegAt(88),
+        output: const ScanOutputFormat.jpegAt(96),
+        maxDimension: 4096,
       );
       if (!mounted) return;
       if (scan == null) {
@@ -139,13 +144,32 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
         ),
       );
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Could not crop photo: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Widget _cornerZoom(DocumentCorners corners, Size size) {
+    final point = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft][_activeCorner!];
+    return Positioned(
+      top: 12, left: point.x > .5 ? 12 : null, right: point.x <= .5 ? 12 : null,
+      child: IgnorePointer(child: Container(
+        width: 132, height: 132,
+        decoration: BoxDecoration(border: Border.all(color: Colors.white, width: 3),
+          borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(blurRadius: 8)]),
+        child: ClipRRect(borderRadius: BorderRadius.circular(13), child: Stack(children: [
+          Positioned(left: 66 - point.x * 500, top: 66 - point.y * 500 * size.height / size.width,
+            width: 500, height: 500 * size.height / size.width,
+            child: Image.file(File(widget.imagePath), fit: BoxFit.fill, cacheWidth: 1600)),
+          const Center(child: Icon(Icons.add, color: Colors.lightBlueAccent, size: 24)),
+        ])),
+      )),
+    );
   }
 
   @override
@@ -153,7 +177,7 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
     final size = _imageSize;
     final corners = _corners;
 
-    return Scaffold(
+    return PopScope(canPop: !_busy, child: Scaffold(
       appBar: AppBar(
         title: const Text('Adjust document'),
         actions: [
@@ -181,22 +205,24 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
                       )
                     : _busy || size == null || corners == null
                     ? const CircularProgressIndicator()
-                    : FittedBox(
-                        fit: BoxFit.contain,
+                    : AspectRatio(
+                        aspectRatio: size.width / size.height,
                         child: SizedBox(
-                          width: size.width,
-                          height: size.height,
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
                               Image.file(
                                 File(widget.imagePath),
                                 fit: BoxFit.fill,
+                                cacheWidth: 1600,
                               ),
                               DraggableCornerOverlay(
                                 corners: corners,
                                 onCornerMoved: _moveCorner,
+                                onActiveCornerChanged: (index) => setState(() => _activeCorner = index),
                               ),
+                              if (_activeCorner != null)
+                                _cornerZoom(corners, size),
                             ],
                           ),
                         ),
@@ -211,6 +237,13 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
                     const Text(
                       'Drag the 4 handles if auto-detection is not exact.',
                     ),
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      TextButton(onPressed: () => _prepare(redetect: true), child: const Text('Detect again')),
+                      TextButton(onPressed: () => setState(() => _corners = const DocumentCorners(
+                        topLeft: (x: 0, y: 0), topRight: (x: 1, y: 0),
+                        bottomRight: (x: 1, y: 1), bottomLeft: (x: 0, y: 1))),
+                        child: const Text('Full photo')),
+                    ]),
                     const SizedBox(height: 10),
                     SegmentedButton<ScanFilter>(
                       segments: const [
@@ -237,6 +270,6 @@ class _ManualCropScreenState extends State<ManualCropScreen> {
           ],
         ),
       ),
-    );
+    ));
   }
 }

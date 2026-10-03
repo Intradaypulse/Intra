@@ -162,6 +162,7 @@ jobs:
           mkdir -p /tmp/pdfmate-native-tests
           javac -d /tmp/pdfmate-native-tests android_native/CancellableOutputStream.java test/native/CancellableOutputStreamTest.java
           java -cp /tmp/pdfmate-native-tests CancellableOutputStreamTest
+          python3 test/native/test_release_launch_guard.py
 
       - name: Run regression tests
         working-directory: buildapp
@@ -206,6 +207,7 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER"
           for abi in arm64-v8a armeabi-v7a x86_64; do
+            python3 scripts/verify_work_database.py "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk"
             cp "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk" "PDFMate-RC-$abi.apk"
             "$APKSIGNER" verify --verbose "PDFMate-RC-$abi.apk"
             sha256sum "PDFMate-RC-$abi.apk" > "PDFMate-RC-$abi.apk.sha256"
@@ -364,3 +366,40 @@ jobs:
           path: device-logs/
           if-no-files-found: ignore
           retention-days: 7
+
+
+  release-startup-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Download newly built release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: PDFMate-APK-x86_64
+          path: installed-release
+      - name: Launch new release APK twice
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash scripts/check_release_launch.sh installed-release/PDFMate-RC-x86_64.apk
+      - name: Upload release startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFMate-Release-startup-diagnostics
+          path: release-launch-logs/

@@ -176,10 +176,11 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
         if (mounted) setState(() => _busy = false);
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Could not choose PDF: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -324,7 +325,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        _source?.uri.pathSegments.last ?? _status,
+                        (_source == null ? null : widget.service.displayName(_source!)) ?? _status,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),

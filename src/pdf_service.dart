@@ -6,19 +6,39 @@ import 'package:document_scan/document_scan.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart' as pdf_format;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'pdf_rules.dart';
 import 'ocr_layout.dart';
+import 'ocr_languages.dart';
 import 'scan_temp_session.dart';
 import 'serial_executor.dart';
+
+Future<Uint8List> _encodeImagePdfPage(String path) async {
+  final bytes = await File(path).readAsBytes();
+  final image = pw.MemoryImage(bytes);
+  final width = image.width, height = image.height;
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    throw StateError('Could not read image dimensions.');
+  }
+  final scale = 842 / math.max(width, height);
+  final document = pw.Document();
+  document.addPage(pw.Page(
+    pageFormat: pdf_format.PdfPageFormat(width * scale, height * scale),
+    margin: pw.EdgeInsets.zero,
+    build: (_) => pw.Image(image, fit: pw.BoxFit.contain),
+  ));
+  return document.save();
+}
 
 class PdfOperationCancelled implements Exception {
   @override
@@ -37,6 +57,13 @@ class PdfOperationControl {
   }
   void check() {
     if (_cancelled) throw PdfOperationCancelled();
+  }
+
+  /// Yield to UI events so even cached/synchronous word loops accept Cancel.
+  Future<void> checkpoint() async {
+    check();
+    await Future<void>.delayed(Duration.zero);
+    check();
   }
 
   void progress(int completed, int total) {
@@ -67,6 +94,19 @@ class CompressionResult {
             .toDouble();
 }
 
+class OcrPagePreview {
+  const OcrPagePreview({required this.bytes, required this.width, required this.height,
+    required this.text, required this.script});
+  final Uint8List bytes;
+  final int width, height;
+  final RecognizedText text;
+  final TextRecognitionScript script;
+  List<String> get languages => {
+    for (final block in text.blocks)
+      for (final line in block.lines) ...line.recognizedLanguages.where((language) => language != 'und'),
+  }.toList();
+}
+
 class PdfService {
   PdfService({
     Future<Directory> Function()? documentsDirectoryProvider,
@@ -78,6 +118,10 @@ class PdfService {
 
   final Future<Directory> Function() _documentsDirectoryProvider;
   final Future<Directory> Function() _temporaryDirectoryProvider;
+  final Map<String, String> _displayNames = {};
+
+  String displayName(File file) => _displayNames[file.path] ?? file.uri.pathSegments.last;
+
   final Set<String> _managedTemporaryPaths = <String>{};
   static final Set<String> _activeTemporaryPaths = <String>{};
 
@@ -105,6 +149,7 @@ class PdfService {
 
   Future<void> secureDeleteTemporary(File? file) async {
     if (file == null || !isManagedTemporaryFile(file)) return;
+    _displayNames.remove(file.path);
     _managedTemporaryPaths.remove(file.path);
     _activeTemporaryPaths.remove(file.path);
     try {
@@ -260,41 +305,44 @@ class PdfService {
   }
 
   Future<File?> imagesToPdf() async {
-    final images = await imagePicker.pickMultiImage(imageQuality: 92);
+    final images = await imagePicker.pickMultiImage();
     if (images.isEmpty) return null;
 
-    final output = await _newFile('Images');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
-    try {
-      await pdf.imagesToPdf([
-        for (final image in images) FileSource(File(image.path)) as DataSource,
-      ], sink);
-      await sink.close();
-      return output;
-    } catch (_) {
-      await sink.close();
-      rethrow;
-    } finally {
-      await pdf.dispose();
-    }
+    return imageFilesToPdf([for (final image in images) File(image.path)], prefix: 'Images');
   }
 
   Future<File> _imagesToPdfBytes(List<Uint8List> images, String prefix) async {
-    final document = pw.Document();
-    for (final bytes in images) {
-      final image = pw.MemoryImage(bytes);
-      document.addPage(
-        pw.Page(
-          margin: const pw.EdgeInsets.all(14),
-          build: (_) =>
-              pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain)),
-        ),
-      );
+    final files = <File>[];
+    try {
+      for (final bytes in images) {
+        final file = await _newManagedTempFile('image_input', extension: 'png');
+        files.add(file);
+        await file.writeAsBytes(bytes, flush: true);
+      }
+      return await imageFilesToPdf(files, prefix: prefix);
+    } finally {
+      for (final file in files) { await secureDeleteTemporary(file); }
     }
-    final file = await _newFile(prefix);
-    await file.writeAsBytes(await document.save(), flush: true);
-    return file;
+  }
+
+  /// Preserve each image's ratio. Only one image is retained in Dart while
+  /// encoding; file-backed native merge avoids a document-sized bytes list.
+  Future<File> imageFilesToPdf(List<File> images, {String prefix = 'Images'}) async {
+    if (images.isEmpty) throw ArgumentError('Select at least one image.');
+    final pages = <File>[];
+    try {
+      for (final file in images) {
+        final encoded = await compute(_encodeImagePdfPage, file.path);
+        final page = await _newManagedTempFile('image_page', extension: 'pdf');
+        pages.add(page);
+        await page.writeAsBytes(encoded, flush: true);
+      }
+      return await _writeNewPdf(prefix, (pdf, sink) => pdf.merge([
+        for (final page in pages) FileSource(page) as DataSource,
+      ], sink));
+    } finally {
+      for (final page in pages) { await secureDeleteTemporary(page); }
+    }
   }
 
   Future<PlatformFile?> pickPdf() => FilePicker.pickFile(
@@ -309,12 +357,13 @@ class PdfService {
 
   Future<File> _materialize(PlatformFile picked) async {
     final file = await _newManagedTempFile('picked');
+    _displayNames[file.path] = picked.name;
     try {
       final path = picked.path;
       if (path != null && await File(path).exists()) {
         await File(path).openRead().pipe(file.openWrite());
       } else {
-        await file.writeAsBytes(await picked.readAsBytes(), flush: true);
+        await picked.readAsByteStream().cast<List<int>>().pipe(file.openWrite());
       }
       return file;
     } catch (_) {
@@ -713,42 +762,25 @@ class PdfService {
     CompressionPreset preset, {
     String? password,
   }) async {
-    final output = await _newFile('Compressed');
     final originalBytes = await source.length();
-    File readable = source;
     File? decryptedTemp;
-
+    File? output;
     try {
       if (password != null && password.isNotEmpty) {
         decryptedTemp = await decryptToTemporary(source, password);
-        readable = decryptedTemp;
       }
-
-      final pdf = Pdf();
-      final sink = await FileSink.create(output);
-      try {
-        final policy = switch (preset) {
-          CompressionPreset.highQuality => PdfImagePolicy.print,
-          CompressionPreset.balanced => PdfImagePolicy.ebook,
-          CompressionPreset.smallest => PdfImagePolicy.screen,
-        };
-        await pdf.compress(FileSource(readable), sink, images: policy);
-        await sink.close();
-      } catch (_) {
-        await sink.close();
-        try {
-          await output.delete();
-        } catch (_) {}
-        rethrow;
-      } finally {
-        await pdf.dispose();
-      }
-
-      return CompressionResult(
-        file: output,
-        originalBytes: originalBytes,
-        outputBytes: await output.length(),
-      );
+      final policy = switch (preset) {
+        CompressionPreset.highQuality => PdfImagePolicy.print,
+        CompressionPreset.balanced => PdfImagePolicy.ebook,
+        CompressionPreset.smallest => PdfImagePolicy.screen,
+      };
+      output = await _writeNewPdf('Compressed', (pdf, sink) =>
+        pdf.compress(FileSource(decryptedTemp ?? source), sink, images: policy));
+      return CompressionResult(file: output, originalBytes: originalBytes,
+        outputBytes: await output.length());
+    } catch (_) {
+      try { await output?.delete(); } catch (_) {}
+      rethrow;
     } finally {
       await secureDeleteTemporary(decryptedTemp);
     }
@@ -789,8 +821,9 @@ class PdfService {
     required Map<int, int> rotations,
     String? password,
   }) async {
-    if (pageOrder.isEmpty)
+    if (pageOrder.isEmpty) {
       throw ArgumentError('At least one page must remain.');
+    }
     final work = await _newManagedTempFile('organizer');
     final output = await _newFile('Organized');
     final engine = Pdf();
@@ -884,55 +917,18 @@ class PdfService {
     }
   }
 
-  Future<File> unlockPdf(File source, String password) async {
-    final output = await _newFile('Unlocked');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
-    try {
-      await pdf.decrypt(FileSource(source), sink, password: password);
-      await sink.close();
-      return output;
-    } catch (_) {
-      try { await sink.close(); } catch (_) {}
-      try { await output.delete(); } catch (_) {}
-      rethrow;
-    } finally {
-      await pdf.dispose();
-    }
-  }
+  Future<File> unlockPdf(File source, String password) =>
+      _writeNewPdf('Unlocked', (pdf, sink) =>
+        pdf.decrypt(FileSource(source), sink, password: password));
 
-  Future<File> protectPdfAdvanced(
-    File source, {
-    required String ownerPassword,
-    String userPassword = '',
-    bool readOnly = false,
-  }) async {
-    final output = await _newFile('Protected');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
-    try {
-      await pdf.encrypt(
-        FileSource(source),
-        sink,
-        encryption: PdfEncryptionConfig(
-          ownerPassword: ownerPassword,
-          userPassword: userPassword,
-          algorithm: PdfEncryptionAlgorithm.aes256,
-          permissions: readOnly
-              ? const PdfPermissions.readOnly()
-              : const PdfPermissions.all(),
-        ),
-      );
-      await sink.close();
-      return output;
-    } catch (_) {
-      try { await sink.close(); } catch (_) {}
-      try { await output.delete(); } catch (_) {}
-      rethrow;
-    } finally {
-      await pdf.dispose();
-    }
-  }
+  Future<File> protectPdfAdvanced(File source, {
+    required String ownerPassword, String userPassword = '', bool readOnly = false,
+  }) => _writeNewPdf('Protected', (pdf, sink) => pdf.encrypt(
+    FileSource(source), sink,
+    encryption: PdfEncryptionConfig(ownerPassword: ownerPassword,
+      userPassword: userPassword, algorithm: PdfEncryptionAlgorithm.aes256,
+      permissions: readOnly ? const PdfPermissions.readOnly() : const PdfPermissions.all()),
+  ));
 
   Future<File> stampSignatureAt(
     File source,
@@ -954,23 +950,8 @@ class PdfService {
     File source, {
     String? password,
     int width = 220,
-  }) async {
-    final pdf = Pdf();
-    PdfDoc? doc;
-    try {
-      doc = await pdf.open(FileSource(source), password: password);
-      await for (final page in doc.render(
-        pages: const PdfPages.single(0),
-        size: PdfRenderSize.thumbnail(width),
-      )) {
-        return page.data;
-      }
-      return null;
-    } finally {
-      await doc?.dispose();
-      await pdf.dispose();
-    }
-  }
+    PdfOperationControl? control,
+  }) => renderPage(source, 0, password: password, width: width, control: control);
 
   Future<List<PdfPageInfo>> pageInfos(File source, {String? password}) async {
     final pdf = Pdf();
@@ -1024,28 +1005,37 @@ class PdfService {
     }
   }
 
+  static final _renderQueue = SerialExecutor();
+
   Future<Uint8List?> renderPage(
     File source,
     int pageIndex, {
     String? password,
     int width = 1200,
-  }) async {
+    PdfOperationControl? control,
+  }) => _renderQueue.run(() async {
+    // Evicted queued jobs must not open or render a PDF.
+    try { control?.check(); } on PdfOperationCancelled { return null; }
     final pdf = Pdf();
     PdfDoc? doc;
     try {
       doc = await pdf.open(FileSource(source), password: password);
+      control?.check();
       await for (final page in doc.render(
         pages: PdfPages.single(pageIndex),
         size: PdfRenderSize.thumbnail(width),
       )) {
+        control?.check();
         return page.data;
       }
+      return null;
+    } on PdfOperationCancelled {
       return null;
     } finally {
       await doc?.dispose();
       await pdf.dispose();
     }
-  }
+  });
 
   List<TextElement> _orderedOcrWords(
     RecognizedText text, {
@@ -1079,6 +1069,73 @@ class PdfService {
       for (final block in blocks)
         for (final line in block.lines) ...line.elements,
     ];
+  }
+
+  Future<OcrPagePreview> recognizePage(File source, int pageIndex, {
+    TextRecognitionScript? script, String? password, PdfOperationControl? control,
+  }) async {
+    final bytes = await _renderQueue.run(() async {
+      control?.check();
+      final pdf = Pdf();
+      PdfDoc? doc;
+      try {
+        doc = await pdf.open(FileSource(source), password: password);
+        control?.check();
+        await for (final page in doc.render(pages: PdfPages.single(pageIndex),
+          size: const PdfRenderSize(maxWidth: 1800, maxHeight: 2500))) {
+          control?.check();
+          return page.data;
+        }
+        throw StateError('Could not render page ${pageIndex + 1}.');
+      } finally {
+        await doc?.dispose();
+        await pdf.dispose();
+      }
+    });
+    final image = img.decodePng(bytes);
+    if (image == null) throw StateError('Could not decode page.');
+    final file = await _newManagedTempFile('preview_ocr', extension: 'png');
+    RecognizedText? best;
+    var selected = script ?? TextRecognitionScript.latin;
+    var bestScore = -1.0;
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      for (final candidate in script == null ? TextRecognitionScript.values : [script]) {
+        await control?.checkpoint();
+        final recognizer = TextRecognizer(script: candidate);
+        try {
+          final text = await recognizer.processImage(InputImage.fromFilePath(file.path));
+          control?.check();
+          final score = ocrScriptScore(text, candidate);
+          if (best == null || score > bestScore) {
+            best = text;
+            selected = candidate;
+            bestScore = score;
+          }
+        } finally { await recognizer.close(); }
+      }
+      return OcrPagePreview(bytes: bytes, width: image.width, height: image.height,
+        text: best!, script: selected);
+    } finally { await secureDeleteTemporary(file); }
+  }
+
+  Future<TextRecognitionScript> detectOcrScript(File source, {
+    String? password, PdfOperationControl? control,
+  }) async {
+    final count = await pageCount(source, password: password);
+    final scores = <TextRecognitionScript, double>{};
+    // Sample start/middle/end to avoid a blank cover deciding the whole document.
+    for (final index in {0, count ~/ 2, count - 1}) {
+      if (index < 0) continue;
+      await control?.checkpoint();
+      final page = await recognizePage(source, index, password: password, control: control);
+      final score = ocrScriptScore(page.text, page.script);
+      scores.update(page.script, (old) => old + score, ifAbsent: () => score);
+    }
+    if (scores.isEmpty || scores.values.every((value) => value == 0)) {
+      throw StateError('No readable text detected. Choose the OCR language manually.');
+    }
+    return scores.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
   }
 
   Future<List<String>> ocrPdf(
@@ -1196,12 +1253,14 @@ class PdfService {
           pageBytes = rendered.data;
           break;
         }
-        if (pageBytes == null)
+        if (pageBytes == null) {
           throw StateError('Could not render page ${index + 1}.');
+        }
 
         final decoded = img.decodePng(pageBytes);
-        if (decoded == null)
+        if (decoded == null) {
           throw StateError('Could not decode page ${index + 1}.');
+        }
 
         final tempImage = await _newManagedTempFile(
           'native_ocr_$index',
@@ -1226,6 +1285,7 @@ class PdfService {
           recognized,
           tableRows: tableRows,
         )) {
+          await control?.checkpoint();
           final text = element.text.trim();
           if (text.isEmpty) continue;
 
@@ -1251,6 +1311,7 @@ class PdfService {
               query: text,
               pages: PdfPages.single(index),
             );
+            control?.check();
             final cx = placement.left + placement.width / 2;
             final cy = yFromBottom + placement.height / 2;
             if (matches.any(
@@ -1259,10 +1320,12 @@ class PdfService {
                   cx <= m.rect.x + m.rect.width &&
                   cy >= m.rect.y &&
                   cy <= m.rect.y + m.rect.height,
-            ))
+            )) {
               continue;
+            }
           }
 
+          control?.check();
           await editor.addWatermark(
             index,
             text,
@@ -1281,6 +1344,7 @@ class PdfService {
             layer: PdfWatermarkLayer.background,
           );
 
+          control?.check();
           if (text.isNotEmpty) {
             pageTokens.add(text);
           }
@@ -1432,11 +1496,13 @@ class PdfService {
           bytes = page.data;
           break;
         }
-        if (bytes == null)
+        if (bytes == null) {
           throw StateError('Could not render page ${index + 1}.');
+        }
         final image = img.decodePng(bytes);
-        if (image == null)
+        if (image == null) {
           throw StateError('Could not decode page ${index + 1}.');
+        }
         final input = await _newManagedTempFile('ocr_input', extension: 'png');
         RecognizedText recognized;
         try {
@@ -1452,6 +1518,7 @@ class PdfService {
         final existingMatches = <String, List<SearchResult>>{};
         final words = <Map<String, Object>>[];
         for (final word in _orderedOcrWords(recognized, tableRows: tableRows)) {
+          await control?.checkpoint();
           if (word.text.trim().isEmpty) continue;
           final box = word.boundingBox;
           if (box.width <= 0 || box.height <= 0) continue;
@@ -1460,6 +1527,7 @@ class PdfService {
               query: word.text,
               pages: PdfPages.single(index),
             );
+            control?.check();
             final cx = box.center.dx * info.effectiveWidth / image.width;
             final cy =
                 info.effectiveHeight -
@@ -1470,8 +1538,9 @@ class PdfService {
                   cx <= m.rect.right &&
                   cy >= m.rect.y &&
                   cy <= m.rect.bottom,
-            ))
+            )) {
               continue;
+            }
           }
           words.add(
             ocrWordGeometry(
@@ -1531,13 +1600,16 @@ class PdfService {
   Future<File> decryptToTemporary(File source, String password) async {
     final output = await _newManagedTempFile('decrypted', extension: 'pdf');
     final pdf = Pdf();
-    final sink = await FileSink.create(output);
+    FileSink? sink;
     try {
+      sink = await FileSink.create(output);
       await pdf.decrypt(FileSource(source), sink, password: password);
       await sink.close();
+      sink = null;
+      _displayNames[output.path] = displayName(source);
       return output;
     } catch (_) {
-      await sink.close();
+      try { await sink?.close(); } catch (_) {}
       await secureDeleteTemporary(output);
       rethrow;
     } finally {
@@ -1546,26 +1618,10 @@ class PdfService {
   }
 
   Future<File> createScannedPdfFromFiles(List<String> paths) async {
-    if (paths.isEmpty) {
-      throw ArgumentError('No scanned pages supplied.');
-    }
-    final output = await _newFile('Scan');
-    final pdf = Pdf();
-    final sink = await FileSink.create(output);
+    if (paths.isEmpty) throw ArgumentError('No scanned pages supplied.');
     try {
-      await pdf.imagesToPdf([
-        for (final path in paths) FileSource(File(path)) as DataSource,
-      ], sink);
-      await sink.close();
-      return output;
-    } catch (_) {
-      await sink.close();
-      try {
-        if (await output.exists()) await output.delete();
-      } catch (_) {}
-      rethrow;
+      return await imageFilesToPdf([for (final path in paths) File(path)], prefix: 'Scan');
     } finally {
-      await pdf.dispose();
       final temp = await _tmp();
       for (final path in paths) {
         try {

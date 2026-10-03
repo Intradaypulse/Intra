@@ -129,7 +129,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
 
   Future<void> _compress() async {
     final source = _source;
-    if (source == null) return;
+    if (source == null || _busy) return;
 
     final oldResult = _result;
     setState(() {
@@ -166,7 +166,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
   Widget build(BuildContext context) {
     final result = _result;
 
-    return Scaffold(
+    return PopScope(canPop: !_busy, child: Scaffold(
       appBar: AppBar(title: const Text('Compress PDF')),
       body: SafeArea(
         child: ListView(
@@ -176,7 +176,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
               child: ListTile(
                 leading: const Icon(Icons.picture_as_pdf_rounded),
                 title: Text(
-                  _source?.uri.pathSegments.last ?? 'Choose a PDF',
+                  (_source == null ? null : widget.service.displayName(_source!)) ?? 'Choose a PDF',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -303,7 +303,7 @@ class _CompressionScreenState extends State<CompressionScreen> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

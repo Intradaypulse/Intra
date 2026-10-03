@@ -10,6 +10,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'pdf_service.dart';
 import 'lru_future_cache.dart';
 import 'signature_screen.dart';
+import 'signature_geometry.dart';
 
 class SignaturePlacementScreen extends StatefulWidget {
   const SignaturePlacementScreen({super.key, required this.service});
@@ -24,6 +25,11 @@ class SignaturePlacementScreen extends StatefulWidget {
 class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   File? _source;
   Uint8List? _signature;
+  Uint8List? _placedSignature;
+  double _signatureAspect = 2.25;
+  Uint8List? _cachedSignature;
+  double? _cachedRotation;
+  String? _previewError;
   final _thumbs = LruFutureCache<int, Uint8List?>(capacity: 24);
   List<PdfPageInfo> _pageInfos = [];
   Uint8List? _preview;
@@ -146,10 +152,11 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
         if (mounted) setState(() => _busy = false);
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Could not choose PDF: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -158,8 +165,37 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   Future<void> _loadPreview() async {
     final source = _source;
     if (source == null) return;
-    final preview = await widget.service.renderPage(source, _page, width: 1400);
-    if (mounted) setState(() => _preview = preview);
+    try {
+      final preview = await widget.service.renderPage(source, _page, width: 1400);
+      if (preview == null) throw StateError('Page renderer returned no image.');
+      if (mounted) setState(() { _preview = preview; _previewError = null; });
+    } catch (e) {
+      if (mounted) setState(() { _preview = null; _previewError = 'Could not render this page. Please retry.'; });
+    }
+  }
+
+  void _updateSignatureImage() {
+    if (identical(_cachedSignature, _signature) && _cachedRotation == _rotationDegrees) return;
+    final decoded = _signature == null ? null : img.decodePng(_signature!);
+    if (decoded == null) return;
+    final rotated = img.copyRotate(decoded, angle: _rotationDegrees,
+        interpolation: img.Interpolation.linear);
+    _placedSignature = Uint8List.fromList(img.encodePng(rotated));
+    _signatureAspect = rotated.width / rotated.height;
+    _cachedSignature = _signature;
+    _cachedRotation = _rotationDegrees;
+  }
+
+  Rect _placement(double pageWidth, double pageHeight) => signaturePlacement(
+    pageWidth: pageWidth, pageHeight: pageHeight, x: _x, y: _y,
+    widthFraction: _widthFraction, imageAspect: _signatureAspect);
+
+  void _clampPlacement() {
+    if (_pageInfos.isEmpty) return;
+    final info = _pageInfos[_page];
+    final rect = _placement(info.width, info.height);
+    _x = rect.left / info.width;
+    _y = rect.top / info.height;
   }
 
   Future<void> _drawSignature() async {
@@ -173,13 +209,16 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
       _y = 0.72;
       _widthFraction = 0.32;
       _rotationDegrees = 0;
+      _updateSignatureImage();
+      _clampPlacement();
     });
   }
 
   Future<void> _selectPage(int index) async {
-    if (_busy || index == _page) return;
+    if (_busy || (index == _page && _previewError == null)) return;
     setState(() {
       _page = index;
+      _clampPlacement();
       _preview = null;
       _busy = true;
     });
@@ -193,7 +232,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   Future<void> _save() async {
     final source = _source;
     final signature = _signature;
-    if (source == null || signature == null || _pageInfos.isEmpty) return;
+    if (_busy || source == null || signature == null || _pageInfos.isEmpty || _preview == null) return;
 
     setState(() {
       _busy = true;
@@ -201,39 +240,13 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     });
 
     try {
-      Uint8List finalSignature = signature;
-      if (_rotationDegrees.abs() > 0.5) {
-        final decoded = img.decodePng(signature);
-        if (decoded != null) {
-          final rotated = img.copyRotate(
-            decoded,
-            angle: _rotationDegrees,
-            interpolation: img.Interpolation.linear,
-          );
-          finalSignature = Uint8List.fromList(img.encodePng(rotated));
-        }
-      }
-
-      final decoded = img.decodePng(finalSignature);
-      final aspect = decoded == null || decoded.height == 0
-          ? 2.25
-          : decoded.width / decoded.height;
-
+      final finalSignature = _placedSignature ?? signature;
       final pageInfo = _pageInfos[_page];
-      final widthPt = pageInfo.width * _widthFraction;
-      var heightPt = widthPt / aspect;
-      final maxHeight = pageInfo.height * 0.45;
-      if (heightPt > maxHeight) heightPt = maxHeight;
-
-      final xPt = (pageInfo.width * _x)
-          .clamp(0.0, math.max(0.0, pageInfo.width - widthPt))
-          .toDouble();
-
-      // Flutter preview origin is top-left; PDF coordinates are bottom-left.
-      final topPt = (pageInfo.height * _y)
-          .clamp(0.0, math.max(0.0, pageInfo.height - heightPt))
-          .toDouble();
-      final yPt = pageInfo.height - topPt - heightPt;
+      final placement = _placement(pageInfo.width, pageInfo.height);
+      final xPt = placement.left;
+      final yPt = pageInfo.height - placement.bottom;
+      final widthPt = placement.width;
+      final heightPt = placement.height;
 
       final output = await widget.service.stampSignatureAt(
         source,
@@ -267,10 +280,18 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     super.dispose();
   }
 
+  Future<Uint8List?> _thumbnail(int index) {
+    final control = PdfOperationControl();
+    return _thumbs.getOrCreate(index,
+      () => widget.service.renderPage(_source!, index, width: 180, control: control),
+      onDiscard: control.cancel,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final preview = _preview;
-    final signature = _signature;
+    final signature = _placedSignature;
 
     return PopScope(
       canPop: !_busy,
@@ -280,7 +301,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
           actions: [
             if (_source != null && signature != null)
               TextButton(
-                onPressed: _busy ? null : _save,
+                onPressed: _busy || _preview == null ? null : _save,
                 child: const Text('Save'),
               ),
           ],
@@ -341,14 +362,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: FutureBuilder<Uint8List?>(
-                                  future: _thumbs.getOrCreate(
-                                    index,
-                                    () => widget.service.renderPage(
-                                      _source!,
-                                      index,
-                                      width: 180,
-                                    ),
-                                  ),
+                                  future: _thumbnail(index),
                                   builder: (context, snapshot) =>
                                       snapshot.data == null
                                       ? const Icon(
@@ -390,6 +404,11 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                   child: preview == null
                       ? _busy
                             ? const CircularProgressIndicator()
+                            : _previewError != null
+                            ? Column(mainAxisSize: MainAxisSize.min, children: [
+                                Text(_previewError!),
+                                TextButton(onPressed: () => _selectPage(_page), child: const Text('Retry')),
+                              ])
                             : const Icon(Icons.draw_outlined, size: 88)
                       : LayoutBuilder(
                           builder: (context, constraints) {
@@ -402,6 +421,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                               width = height * aspect;
                             }
 
+                            final placement = _placement(width, height);
                             return SizedBox(
                               width: width,
                               height: height,
@@ -416,16 +436,19 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                                   ),
                                   if (signature != null)
                                     Positioned(
-                                      left: _x * width,
-                                      top: _y * height,
-                                      width: _widthFraction * width,
+                                      left: placement.left,
+                                      top: placement.top,
+                                      width: placement.width,
+                                      height: placement.height,
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.translucent,
                                         onScaleStart: (_) {
+                                          if (_busy) return;
                                           _startWidth = _widthFraction;
                                           _startRotation = _rotationDegrees;
                                         },
                                         onScaleUpdate: (details) {
+                                          if (_busy) return;
                                           setState(() {
                                             _x =
                                                 (_x +
@@ -449,12 +472,11 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                                                 details.rotation *
                                                     180 /
                                                     math.pi;
+                                            _updateSignatureImage();
+                                            _clampPlacement();
                                           });
                                         },
-                                        child: Transform.rotate(
-                                          angle:
-                                              _rotationDegrees * math.pi / 180,
-                                          child: DecoratedBox(
+                                        child: DecoratedBox(
                                             decoration: BoxDecoration(
                                               border: Border.all(
                                                 color: Theme.of(
@@ -467,7 +489,6 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                                               signature,
                                               fit: BoxFit.contain,
                                             ),
-                                          ),
                                         ),
                                       ),
                                     ),
@@ -489,11 +510,13 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                         child: Text('Drag to move • pinch to resize/rotate'),
                       ),
                       TextButton(
-                        onPressed: () => setState(() {
+                        onPressed: _busy ? null : () => setState(() {
                           _x = 0.54;
                           _y = 0.72;
                           _widthFraction = 0.32;
                           _rotationDegrees = 0;
+                          _updateSignatureImage();
+                          _clampPlacement();
                         }),
                         child: const Text('Reset'),
                       ),

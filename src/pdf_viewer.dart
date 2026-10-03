@@ -9,6 +9,7 @@ import 'package:pdfx/pdfx.dart';
 
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
+import 'ocr_page_preview_screen.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   const PdfViewerScreen({
@@ -36,8 +37,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   int _page = 1;
   int _pages = 0;
   bool _busy = true;
+  bool _preparing = false;
   bool _showThumbs = false;
   bool _searchCancelled = false;
+  bool _searching = false;
   int _searchProgress = 0;
   final Map<int, String> _searchText = {};
   int _searchTextCharacters = 0;
@@ -84,9 +87,28 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Future<void> _prepare() async {
+    if (!mounted || _preparing) return;
+    _preparing = true;
+    final oldController = _controller;
+    final oldTemporary = _temporaryDecrypted;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _controller = null;
+      _temporaryDecrypted = null;
+      _workingPath = null;
+      _pages = 0;
+      _page = 1;
+      _thumbCache.clear();
+      _searchText.clear();
+      _searchTextCharacters = 0;
+    });
+    oldController?.dispose();
     var source = File(widget.path);
 
     try {
+      if (oldTemporary != null) await _service.secureDeleteTemporary(oldTemporary);
+      if (!mounted) return;
       // Preflight with the PDF engine so protected PDFs can be handled before
       // pdfx (Android's native PdfRenderer) attempts to open them.
       while (true) {
@@ -145,19 +167,24 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           _error = 'Could not open PDF: $e';
         });
       }
+    } finally {
+      _preparing = false;
     }
   }
 
   Future<Uint8List?> _thumbnailFor(int index) {
     final path = _workingPath;
     if (path == null) return Future<Uint8List?>.value(null);
+    final control = PdfOperationControl();
     return _thumbCache.getOrCreate(
       index,
       () => _service.renderPage(
         File(path),
         index,
         width: 130,
+        control: control,
       ),
+      onDiscard: control.cancel,
     );
   }
 
@@ -240,6 +267,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     setState(() {
       _busy = true;
       _searchCancelled = false;
+      _searching = true;
       _searchProgress = 0;
     });
     final matches = <(int, String)>[];
@@ -254,6 +282,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         var text = _searchText[i];
         if (text == null) {
           text = await doc.extract(pages: PdfPages.single(i));
+          if (_searchCancelled) break;
           if (mounted && _searchTextCharacters + text.length <= _searchCacheLimit) {
             _searchText[i] = text;
             _searchTextCharacters += text.length;
@@ -278,7 +307,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     } finally {
       await doc?.dispose();
       await pdf.dispose();
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() { _busy = false; _searching = false; });
     }
 
     if (!mounted) return;
@@ -304,10 +333,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           shrinkWrap: true,
           itemCount: matches.length + 1,
           itemBuilder: (context, index) {
-            if (index == 0) return ListTile(
+            if (index == 0) { return ListTile(
               title: Text('${matches.length} matching page(s)'),
               subtitle: Text('“$query”'),
             );
+            }
             final match = matches[index - 1];
             return ListTile(
               leading: const Icon(Icons.find_in_page_outlined),
@@ -367,6 +397,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          IconButton(tooltip: 'Scan and copy text on this page',
+            icon: const Icon(Icons.document_scanner_outlined),
+            onPressed: _busy || _workingPath == null || _searching ? null : () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => OcrPagePreviewScreen(
+                service: _service, source: File(_workingPath!), initialPage: _page - 1, pageCount: _pages)));
+            }),
           if (_pages > 0)
             TextButton(
               onPressed: _jumpToPage,
@@ -394,7 +430,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text(_error!, textAlign: TextAlign.center),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(_error!, textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: _prepare, child: const Text('Retry')),
+                ]),
               ),
             )
           : _busy && controller == null
@@ -509,13 +549,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                 },
                                 onDocumentError: (error) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Could not render PDF: $error',
-                                        ),
-                                      ),
-                                    );
+                                    setState(() {
+                                      _busy = false;
+                                      _error = 'Could not render PDF: $error';
+                                    });
                                   }
                                 },
                               ),
@@ -529,14 +566,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             top: 0,
                             child: LinearProgressIndicator(),
                           ),
-                        if (_busy && _searchProgress > 0)
+                        if (_searching)
                           Positioned(
                             left: 8, right: 8, top: 8,
                             child: Material(
                               child: ListTile(
-                                title: Text('Searching page $_searchProgress / $_pages'),
+                                title: Text(_searchCancelled ? 'Cancelling search…' : _searchProgress == 0 ? 'Preparing search…' : 'Searching page $_searchProgress / $_pages'),
                                 trailing: TextButton(
-                                  onPressed: () => setState(() => _searchCancelled = true),
+                                  onPressed: _searchCancelled ? null : () => setState(() => _searchCancelled = true),
                                   child: const Text('Cancel'),
                                 ),
                               ),

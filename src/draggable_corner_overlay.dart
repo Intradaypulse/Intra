@@ -6,9 +6,11 @@ class DraggableCornerOverlay extends StatefulWidget {
     super.key,
     required this.corners,
     required this.onCornerMoved,
+    this.onActiveCornerChanged,
   });
 
   final DocumentCorners corners;
+  final ValueChanged<int?>? onActiveCornerChanged;
   final void Function(int index, ({double x, double y}) point) onCornerMoved;
 
   @override
@@ -20,7 +22,7 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
   static const _fill = Color(0x224F7CFF);
   static const _handle = Color(0xFF4F7CFF);
   static const double _hitRadius = 48;
-  static const double _touchLift = 38;
+  Offset _dragOffset = Offset.zero;
 
   int? _activeHandle;
   Size _size = Size.zero;
@@ -46,20 +48,27 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
         nearestDistance = d;
       }
     }
+    if (nearest >= 0) {
+      _dragOffset = _toLocal(points[nearest]) - details.localPosition;
+    }
     setState(() => _activeHandle = nearest >= 0 ? nearest : null);
+    widget.onActiveCornerChanged?.call(_activeHandle);
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
     final active = _activeHandle;
     if (active == null || _size.isEmpty) return;
-    final lifted = details.localPosition - const Offset(0, _touchLift);
+    final lifted = details.localPosition + _dragOffset;
     widget.onCornerMoved(active, (
       x: (lifted.dx / _size.width).clamp(0.0, 1.0),
       y: (lifted.dy / _size.height).clamp(0.0, 1.0),
     ));
   }
 
-  void _onPanEnd(DragEndDetails _) => setState(() => _activeHandle = null);
+  void _endDrag() {
+    setState(() => _activeHandle = null);
+    widget.onActiveCornerChanged?.call(null);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +79,8 @@ class _DraggableCornerOverlayState extends State<DraggableCornerOverlay> {
           behavior: HitTestBehavior.opaque,
           onPanStart: _onPanStart,
           onPanUpdate: _onPanUpdate,
-          onPanEnd: _onPanEnd,
+          onPanEnd: (_) => _endDrag(),
+          onPanCancel: _endDrag,
           child: CustomPaint(
             painter: _CornerPainter(
               corners: widget.corners,

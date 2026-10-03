@@ -274,8 +274,9 @@ class AdsService {
   }
 
   void _loadInterstitial() {
-    if (!_canRequestAds || _interstitial != null || _loadingInterstitial)
+    if (!_canRequestAds || _interstitial != null || _loadingInterstitial) {
       return;
+    }
     _loadingInterstitial = true;
     final generation = _consentGeneration;
     InterstitialAd.load(
@@ -300,6 +301,20 @@ class AdsService {
     );
   }
 
+  Future<bool> _presentAd(Future<void> Function() show,
+      Completer<void> dismissed, void Function() abandon) async {
+    try {
+      await (() async { await show(); await dismissed.future; })()
+          .timeout(const Duration(minutes: 3));
+      return true;
+    } catch (_) {
+      if (!dismissed.isCompleted) dismissed.complete();
+      _isShowingFullScreenAd = false;
+      abandon();
+      return false;
+    }
+  }
+
   Future<void> recordCompletedOperation() async {
     if (!_canRequestAds) return;
     _completedOperations++;
@@ -319,6 +334,7 @@ class AdsService {
     _isShowingFullScreenAd = true;
     ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdDismissedFullScreenContent: (shownAd) {
+        if (completer.isCompleted) return;
         shownAd.dispose();
         _interstitial = null;
         _isShowingFullScreenAd = false;
@@ -326,6 +342,7 @@ class AdsService {
         if (!completer.isCompleted) completer.complete();
       },
       onAdFailedToShowFullScreenContent: (shownAd, error) {
+        if (completer.isCompleted) return;
         shownAd.dispose();
         _interstitial = null;
         _isShowingFullScreenAd = false;
@@ -333,9 +350,10 @@ class AdsService {
         if (!completer.isCompleted) completer.complete();
       },
     );
-    ad.show();
     _lastFullScreenAdAt = DateTime.now();
-    await completer.future;
+    await _presentAd(() => ad.show(), completer, () {
+      ad.dispose(); _interstitial = null; _loadInterstitial();
+    });
   }
 
   void _loadRewarded() {
@@ -405,8 +423,9 @@ class AdsService {
   Future<RewardedAdOutcome> showRewardedGate() async {
     if (_isShowingFullScreenAd) return RewardedAdOutcome.unavailable;
     final ready = await ensureRewardedReady();
-    if (!ready || !_canRequestAds || _isShowingFullScreenAd)
+    if (!ready || !_canRequestAds || _isShowingFullScreenAd) {
       return RewardedAdOutcome.unavailable;
+    }
 
     final ad = _rewarded;
     if (ad == null) return RewardedAdOutcome.unavailable;
@@ -421,6 +440,7 @@ class AdsService {
         _lastFullScreenAdAt = DateTime.now();
       },
       onAdDismissedFullScreenContent: (shownAd) {
+        if (completer.isCompleted) return;
         shownAd.dispose();
         _rewarded = null;
         _isShowingFullScreenAd = false;
@@ -428,6 +448,7 @@ class AdsService {
         if (!completer.isCompleted) completer.complete();
       },
       onAdFailedToShowFullScreenContent: (shownAd, error) {
+        if (completer.isCompleted) return;
         failed = true;
         shownAd.dispose();
         _rewarded = null;
@@ -437,15 +458,14 @@ class AdsService {
       },
     );
 
-    ad.show(
+    final presented = await _presentAd(() => ad.show(
       onUserEarnedReward: (_, reward) {
         earned = true;
         _lastFullScreenAdAt = DateTime.now();
       },
-    );
-    await completer.future;
+    ), completer, () { ad.dispose(); _rewarded = null; _loadRewarded(); });
 
-    if (failed) return RewardedAdOutcome.failed;
+    if (!presented || failed) return RewardedAdOutcome.failed;
     return earned ? RewardedAdOutcome.earned : RewardedAdOutcome.dismissed;
   }
 
@@ -487,15 +507,17 @@ class AdsService {
         !_canRequestAds ||
         _sessionCount < 3 ||
         _isShowingFullScreenAd ||
-        recentlyShowedFullScreenAd)
+        recentlyShowedFullScreenAd) {
       return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     if (!_appOpenEnabled ||
         !_canRequestAds ||
         _isShowingFullScreenAd ||
-        recentlyShowedFullScreenAd)
+        recentlyShowedFullScreenAd) {
       return;
+    }
     final lastMs = prefs.getInt(_lastAppOpenKey);
     if (lastMs != null) {
       final lastShown = DateTime.fromMillisecondsSinceEpoch(lastMs);
@@ -517,6 +539,7 @@ class AdsService {
       return;
     }
 
+    final completer = Completer<void>();
     _isShowingFullScreenAd = true;
     ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (_) async {
@@ -526,23 +549,29 @@ class AdsService {
         );
       },
       onAdDismissedFullScreenContent: (shownAd) {
+        if (completer.isCompleted) return;
         shownAd.dispose();
         _appOpenAd = null;
         _appOpenLoadTime = null;
         _isShowingFullScreenAd = false;
         _loadAppOpen();
+        if (!completer.isCompleted) completer.complete();
       },
       onAdFailedToShowFullScreenContent: (shownAd, error) {
+        if (completer.isCompleted) return;
         shownAd.dispose();
         _appOpenAd = null;
         _appOpenLoadTime = null;
         _isShowingFullScreenAd = false;
         _loadAppOpen();
+        if (!completer.isCompleted) completer.complete();
       },
     );
 
-    ad.show();
     _lastFullScreenAdAt = DateTime.now();
+    await _presentAd(() => ad.show(), completer, () {
+      ad.dispose(); _appOpenAd = null; _appOpenLoadTime = null; _loadAppOpen();
+    });
   }
 
   Future<void> dispose() async {

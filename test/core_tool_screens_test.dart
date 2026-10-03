@@ -43,9 +43,11 @@ void main() {
     );
 
     expect(find.text('Advanced split'), findsOneWidget);
-    expect(find.text('Each page'), findsOneWidget);
-    expect(find.text('Every N'), findsOneWidget);
-    expect(find.text('Custom'), findsOneWidget);
+    await tester.tap(find.text('Select page numbers'));
+    await tester.pumpAndSettle();
+    expect(find.text('Each page'), findsWidgets);
+    expect(find.text('Every N pages'), findsWidgets);
+    expect(find.text('Custom output groups'), findsWidgets);
   });
 
   testWidgets('page organizer starts without eager thumbnails', (tester) async {

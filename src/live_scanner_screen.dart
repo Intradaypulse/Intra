@@ -8,6 +8,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'manual_crop_screen.dart';
 import 'scan_temp_session.dart';
+import 'scan_capture_gate.dart';
+import 'crop_geometry.dart';
 
 class LiveScannerScreen extends StatefulWidget {
   const LiveScannerScreen({super.key});
@@ -19,7 +21,8 @@ class LiveScannerScreen extends StatefulWidget {
 class _LiveScannerScreenState extends State<LiveScannerScreen>
     with WidgetsBindingObserver {
   final _detector = DocumentDetector();
-  final _analyzer = AutoCaptureAnalyzer();
+  final _analyzer = ScanCaptureGate();
+  final _captureClock = Stopwatch()..start();
 
   CameraController? _controller;
   StreamController<ScanInput>? _frames;
@@ -82,7 +85,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
 
       final controller = CameraController(
         back,
-        ResolutionPreset.high,
+        ResolutionPreset.veryHigh,
         enableAudio: false,
         imageFormatGroup: Platform.isIOS
             ? ImageFormatGroup.bgra8888
@@ -160,15 +163,15 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   void _onDetection(DetectionEvent event) {
     if (!mounted || _capturing) return;
 
-    final state = _analyzer.addEvent(event);
-    _captureStatus = state.status;
+    final shouldCapture = _analyzer.add(event, _captureClock.elapsed);
+    _captureStatus = _analyzer.status;
 
     switch (event) {
       case DetectionSuccess(:final corners):
         setState(() {
           _corners = corners;
           _error = null;
-          _hint = state.shouldCapture
+          _hint = shouldCapture
               ? 'Ready'
               : 'Document detected — hold steady';
         });
@@ -184,7 +187,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
         setState(() => _error = 'Detection error: $error');
     }
 
-    if (state.shouldCapture && _autoCapture && !_capturing) {
+    if (shouldCapture && _autoCapture && !_capturing) {
       unawaited(_captureStill());
     }
   }
@@ -279,7 +282,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
 
       final detected = await _detector.detect(
         ScanInput.file(capturedPath),
-        sensitivity: DetectionSensitivity.lenient,
+        sensitivity: DetectionSensitivity.strict,
       );
 
       if (!mounted) return;
@@ -287,7 +290,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
         MaterialPageRoute(
           builder: (_) => ManualCropScreen(
             imagePath: capturedPath,
-            initialCorners: detected,
+            initialCorners: detected != null && validCropCorners(detected) ? detected : null,
           ),
         ),
       );
@@ -330,8 +333,9 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
             if (!_disposed &&
                 _foreground &&
                 identical(current, _controller) &&
-                !current.value.isStreamingImages)
+                !current.value.isStreamingImages) {
               await _resumeStream(current);
+            }
           });
         } catch (e) {
           if (mounted) setState(() => _error = 'Camera restart failed: $e');
@@ -357,6 +361,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   }
 
   void _finish() {
+    if (_capturing) return;
     if (_pages.isEmpty) {
       Navigator.of(context).pop<List<String>>();
       return;
@@ -438,7 +443,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
             ],
           ),
           TextButton(
-            onPressed: _pages.isEmpty ? null : _finish,
+            onPressed: (_pages.isEmpty || _capturing) ? null : _finish,
             child: const Text('Done'),
           ),
         ],
