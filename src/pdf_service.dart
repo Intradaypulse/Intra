@@ -22,6 +22,8 @@ import 'ocr_layout.dart';
 import 'ocr_languages.dart';
 import 'scan_temp_session.dart';
 import 'serial_executor.dart';
+import 'signature_geometry.dart';
+import 'dart:ui' show Rect;
 
 Future<Uint8List> _encodeImagePdfPage(String path) async {
   final bytes = await File(path).readAsBytes();
@@ -356,7 +358,7 @@ class PdfService {
 
   /// Preserve each image's ratio. Only one image is retained in Dart while
   /// encoding; file-backed native merge avoids a document-sized bytes list.
-  Future<File> imageFilesToPdf(List<File> images, {String prefix = 'Images'}) async {
+  Future<File> imageFilesToPdf(List<File> images, {String prefix = 'Images', File? destination}) async {
     if (images.isEmpty) throw ArgumentError('Select at least one image.');
     final pages = <File>[];
     try {
@@ -368,7 +370,7 @@ class PdfService {
       }
       return await _writeNewPdf(prefix, (pdf, sink) => pdf.merge([
         for (final page in pages) FileSource(page) as DataSource,
-      ], sink));
+      ], sink), destination: destination);
     } finally {
       for (final page in pages) { await secureDeleteTemporary(page); }
     }
@@ -820,8 +822,12 @@ class PdfService {
   }
 
   Future<File> _writeNewPdf(String prefix,
-      Future<void> Function(Pdf pdf, FileSink sink) write) async {
-    final output = await _newFile(prefix);
+      Future<void> Function(Pdf pdf, FileSink sink) write, {File? destination}) async {
+    if (destination != null && await destination.exists()) {
+      throw StateError('Output already exists. Recover the completed scan instead.');
+    }
+    final output = destination == null ? await _newFile(prefix) : File('${destination.path}.pending');
+    _pendingOutputs.add(output.path);
     final pdf = Pdf();
     FileSink? sink;
     try {
@@ -835,6 +841,7 @@ class PdfService {
       try { await output.delete(); } catch (_) {}
       rethrow;
     } finally {
+      _pendingOutputs.remove(output.path);
       await pdf.dispose();
     }
   }
@@ -987,11 +994,16 @@ class PdfService {
     PdfOperationControl? control,
   }) => renderPage(source, 0, password: password, width: width, control: control);
 
-  Future<PdfRect> pageVisibleBox(File source, int page) async {
+  Future<PdfRect> pageVisibleBox(File source, int page, {String? password}) async {
     final pdf = Pdf();
     PdfEditor? editor;
     try {
-      editor = await pdf.edit(FileSource(source));
+      editor = await pdf.edit(FileSource(source), password: password);
+      return await _visibleBox(editor, page);
+    } finally { await editor?.dispose(); await pdf.dispose(); }
+  }
+
+  Future<PdfRect> _visibleBox(PdfEditor editor, int page) async {
       final media = await editor.pageMediaBox(page);
       final crop = await editor.pageCropBox(page);
       if (crop == null) return media;
@@ -999,7 +1011,6 @@ class PdfService {
       final right = math.min(media.x + media.width, crop.x + crop.width);
       final top = math.min(media.y + media.height, crop.y + crop.height);
       return right > x && top > y ? PdfRect(x: x, y: y, width: right - x, height: top - y) : media;
-    } finally { await editor?.dispose(); await pdf.dispose(); }
   }
 
   Future<List<PdfPageInfo>> pageInfos(File source, {String? password}) async {
@@ -1186,6 +1197,14 @@ class PdfService {
       scores.update(page.script, (old) => old + score, ifAbsent: () => score);
     }
     if (scores.isEmpty || scores.values.every((value) => value == 0)) {
+      final sampled = {0, count ~/ 2, count - 1};
+      for (var index = 0; index < count; index++) {
+        if (sampled.contains(index)) continue;
+        await control?.checkpoint();
+        control?.progress(index, count);
+        final page = await recognizePage(source, index, password: password, control: control);
+        if (ocrScriptScore(page.text, page.script) > 0) return page.script;
+      }
       throw StateError('No readable text detected. Choose the OCR language manually.');
     }
     return scores.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
@@ -1274,223 +1293,6 @@ class PdfService {
     }
   }
 
-  Future<File> _makeSearchablePdfPreservingOriginal(
-    File source, {
-    required TextRecognitionScript script,
-    String? password,
-    PdfOperationControl? control,
-    bool tableRows = false,
-  }) async {
-    final engine = Pdf();
-    PdfDoc? doc;
-    PdfEditor? editor;
-    final recognizer = TextRecognizer(script: script);
-    final output = await _newFile('Searchable');
-    final verification = await _newManagedTempFile('ocr_verify', extension: 'jsonl');
-    IOSink? verificationWriter;
-    var changed = false;
-
-    try {
-      verificationWriter = verification.openWrite();
-      doc = await engine.open(FileSource(source), password: password);
-      editor = await engine.edit(FileSource(source), password: password);
-
-      for (var index = 0; index < doc.pageCount; index++) {
-        control?.progress(index, doc.pageCount);
-        final existing = await doc.extract(pages: PdfPages.single(index));
-        final existingMatches = <String, List<SearchResult>>{};
-
-        Uint8List? pageBytes;
-        await for (final rendered in doc.render(
-          pages: PdfPages.single(index),
-          size: const PdfRenderSize(maxWidth: 2200, maxHeight: 3200),
-        )) {
-          pageBytes = rendered.data;
-          break;
-        }
-        if (pageBytes == null) {
-          throw StateError('Could not render page ${index + 1}.');
-        }
-
-        final decoded = img.decodePng(pageBytes);
-        if (decoded == null) {
-          throw StateError('Could not decode page ${index + 1}.');
-        }
-
-        final tempImage = await _newManagedTempFile(
-          'native_ocr_$index',
-          extension: 'png',
-        );
-        RecognizedText recognized;
-        try {
-          await tempImage.writeAsBytes(pageBytes, flush: true);
-          recognized = await recognizer.processImage(
-            InputImage.fromFilePath(tempImage.path),
-          );
-        } finally {
-          await secureDeleteTemporary(tempImage);
-        }
-
-        final info = doc.pages[index];
-        final pageWidth = info.effectiveWidth;
-        final pageHeight = info.effectiveHeight;
-        final pageTokens = <String>[];
-
-        for (final element in _orderedOcrWords(
-          recognized,
-          tableRows: tableRows,
-        )) {
-          await control?.checkpoint();
-          final text = element.text.trim();
-          if (text.isEmpty) continue;
-
-          final placement = mapOcrRectToPdf(
-            leftPx: element.boundingBox.left,
-            topPx: element.boundingBox.top,
-            widthPx: element.boundingBox.width,
-            heightPx: element.boundingBox.height,
-            imageWidthPx: decoded.width.toDouble(),
-            imageHeightPx: decoded.height.toDouble(),
-            pdfWidthPt: pageWidth,
-            pdfHeightPt: pageHeight,
-          );
-          if (placement.width <= 0 || placement.height <= 0) continue;
-
-          final yFromBottom = math.max(
-            0.0,
-            pageHeight - placement.top - placement.height,
-          );
-
-          if (existing.trim().isNotEmpty) {
-            final matches = existingMatches[text] ??= await doc.search(
-              query: text,
-              pages: PdfPages.single(index),
-            );
-            control?.check();
-            final cx = placement.left + placement.width / 2;
-            final cy = yFromBottom + placement.height / 2;
-            if (matches.any(
-              (m) =>
-                  cx >= m.rect.x &&
-                  cx <= m.rect.x + m.rect.width &&
-                  cy >= m.rect.y &&
-                  cy <= m.rect.y + m.rect.height,
-            )) {
-              continue;
-            }
-          }
-
-          control?.check();
-          await editor.addWatermark(
-            index,
-            text,
-            style: PdfWatermarkStyle(
-              fontSize: math.max(2, placement.height * 0.82),
-              opacity: 0.001,
-              rotation: element.angle ?? 0,
-              color: PdfColor.black,
-            ),
-            position: PdfWatermarkPosition.exact(
-              x: placement.left,
-              y: yFromBottom,
-              width: placement.width,
-              height: placement.height,
-            ),
-            layer: PdfWatermarkLayer.background,
-          );
-
-          control?.check();
-          if (text.isNotEmpty) {
-            pageTokens.add(text);
-          }
-          changed = true;
-        }
-
-        if (pageTokens.isNotEmpty) {
-          verificationWriter.writeln(jsonEncode({'page': index, 'tokens': pageTokens}));
-          await verificationWriter.flush();
-        }
-      }
-
-      await verificationWriter.close();
-      verificationWriter = null;
-      if (!changed) {
-        await source.copy(output.path);
-        control?.check();
-        return await _commitOutput(output);
-      }
-
-      control?.check();
-      final sink = await FileSink.create(output);
-      try {
-        await editor.save(sink, options: const PdfSaveOptions.incremental());
-        await sink.close();
-      } catch (_) {
-        await sink.close();
-        try {
-          await output.delete();
-        } catch (_) {}
-        rethrow;
-      }
-
-      // The native editor preserves the original page objects, annotations,
-      // forms, bookmarks and vector content. Confirm that the invisible OCR
-      // text actually survives extraction for the selected script. If an OEM
-      // PDF engine cannot encode a script, verification rejects the output.
-      if (await verification.length() > 0) {
-        final verifier = Pdf();
-        PdfDoc? verifyDoc;
-        try {
-          verifyDoc = await verifier.open(
-            FileSource(output),
-            password: password,
-          );
-          await for (final line in verification.openRead().transform(utf8.decoder).transform(const LineSplitter())) {
-            control?.check();
-            final entry = jsonDecode(line) as Map<String, dynamic>;
-            final pageIndex = entry['page'] as int;
-            final tokens = (entry['tokens'] as List).cast<String>();
-            final extracted = await verifyDoc.extract(
-              pages: PdfPages.single(pageIndex),
-            );
-            final normalized = extracted.replaceAll(RegExp(r'\s+'), '');
-            control?.check();
-            final matched = tokens.every(
-              (token) =>
-                  normalized.contains(token.replaceAll(RegExp(r'\s+'), '')),
-            );
-            if (!matched) {
-              throw StateError(
-                'Native searchable-PDF text verification failed on '
-                'page ${pageIndex + 1}.',
-              );
-            }
-          }
-        } finally {
-          await verifyDoc?.dispose();
-          await verifier.dispose();
-        }
-      }
-
-      control?.check();
-      return await _commitOutput(output);
-    } catch (_) {
-      // An extraction/encoding failure must not leave a misleading partial
-      // "searchable" document in the user's library.
-      try {
-        if (await output.exists()) await output.delete();
-      } catch (_) {}
-      rethrow;
-    } finally {
-      try { await verificationWriter?.close(); } catch (_) {}
-      await secureDeleteTemporary(verification);
-      await recognizer.close();
-      await editor?.dispose();
-      await doc?.dispose();
-      await engine.dispose();
-    }
-  }
-
   Future<File> makeSearchablePdf(
     File source, {
     TextRecognitionScript script = TextRecognitionScript.latin,
@@ -1498,40 +1300,29 @@ class PdfService {
     PdfOperationControl? control,
     bool tableRows = false,
   }) async {
-    if (script == TextRecognitionScript.devanagiri) {
-      return _makeDevanagariSearchablePdf(
-        source,
-        password: password,
-        control: control,
-        tableRows: tableRows,
-      );
-    }
-    return _makeSearchablePdfPreservingOriginal(
-      source,
-      script: script,
-      password: password,
-      control: control,
-      tableRows: tableRows,
-    );
+    return _makeNativeSearchablePdf(source, script: script, password: password,
+      control: control, tableRows: tableRows);
   }
 
   /// Add an invisible embedded-font layer in an incremental revision. Only
   /// OCR geometry is spooled; rendered page images are deleted immediately.
-  Future<File> _makeDevanagariSearchablePdf(
+  Future<File> _makeNativeSearchablePdf(
     File source, {
+    required TextRecognitionScript script,
     String? password,
     PdfOperationControl? control,
     bool tableRows = false,
   }) async {
     if (!Platform.isAndroid) {
       throw UnsupportedError(
-        'Preserving Hindi OCR currently requires Android.',
+        'Preserving searchable OCR currently requires Android.',
       );
     }
     final engine = Pdf();
     PdfDoc? doc;
-    final recognizer = TextRecognizer(script: TextRecognitionScript.devanagiri);
-    final output = await _newFile('Searchable_Hindi');
+    PdfEditor? boxes;
+    final recognizer = TextRecognizer(script: script);
+    final output = await _newFile('Searchable');
     final manifest = await _newManagedTempFile(
       'ocr_geometry',
       extension: 'jsonl',
@@ -1540,6 +1331,7 @@ class PdfService {
     final token = DateTime.now().microsecondsSinceEpoch.toString();
     try {
       doc = await engine.open(FileSource(source), password: password);
+      boxes = await engine.edit(FileSource(source), password: password);
       writer = manifest.openWrite();
       for (var index = 0; index < doc.pageCount; index++) {
         control?.progress(index, doc.pageCount);
@@ -1569,6 +1361,9 @@ class PdfService {
           await secureDeleteTemporary(input);
         }
         final info = doc.pages[index];
+        final visible = await _visibleBox(boxes, index);
+        final viewWidth = info.rotation % 180 == 0 ? visible.width : visible.height;
+        final viewHeight = info.rotation % 180 == 0 ? visible.height : visible.width;
         final existing = await doc.extract(pages: PdfPages.single(index));
         final existingMatches = <String, List<SearchResult>>{};
         final words = <Map<String, Object>>[];
@@ -1583,10 +1378,12 @@ class PdfService {
               pages: PdfPages.single(index),
             );
             control?.check();
-            final cx = box.center.dx * info.effectiveWidth / image.width;
-            final cy =
-                info.effectiveHeight -
-                box.center.dy * info.effectiveHeight / image.height;
+            final center = signaturePdfRect(
+              Rect.fromLTWH(box.center.dx * viewWidth / image.width,
+                box.center.dy * viewHeight / image.height, 0, 0),
+              visible.width, visible.height, info.rotation);
+            final cx = center.left + visible.x;
+            final cy = center.top + visible.y;
             if (matches.any(
               (m) =>
                   cx >= m.rect.x &&
@@ -1605,8 +1402,8 @@ class PdfService {
               top: box.top,
               width: box.width,
               height: box.height,
-              scaleX: info.effectiveWidth / image.width,
-              scaleY: info.effectiveHeight / image.height,
+              scaleX: viewWidth / image.width,
+              scaleY: viewHeight / image.height,
               angle: word.angle ?? 0,
             ),
           );
@@ -1616,6 +1413,8 @@ class PdfService {
       }
       await writer.close();
       writer = null;
+      await boxes.dispose();
+      boxes = null;
       await doc.dispose();
       doc = null;
       control?.check();
@@ -1647,6 +1446,7 @@ class PdfService {
       } catch (_) {}
       await secureDeleteTemporary(manifest);
       await recognizer.close();
+      await boxes?.dispose();
       await doc?.dispose();
       await engine.dispose();
     }
@@ -1672,10 +1472,10 @@ class PdfService {
     }
   }
 
-  Future<File> createScannedPdfFromFiles(List<String> paths) async {
+  Future<File> createScannedPdfFromFiles(List<String> paths, {File? destination}) async {
     if (paths.isEmpty) throw ArgumentError('No scanned pages supplied.');
     // Capture ownership stays with the draft until library registration commits.
-    return imageFilesToPdf([for (final path in paths) File(path)], prefix: 'Scan');
+    return imageFilesToPdf([for (final path in paths) File(path)], prefix: 'Scan', destination: destination);
   }
 
   Future<T> _withLegacyStoragePermission<T>(

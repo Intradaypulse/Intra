@@ -12,6 +12,7 @@ import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
@@ -118,8 +119,17 @@ class MainActivity : FlutterActivity() {
                 require(permissions?.getDictionaryObject(COSName.DOCMDP) == null) {
                     "This certified PDF forbids an OCR content update. Extract text instead."
                 }
-                val font = assets.open("flutter_assets/assets/fonts/NotoSansDevanagariOCR.ttf").use {
-                    PDType0Font.load(doc, it, false)
+                // Dedicated OCR-only fonts preserve logical Unicode, including CJK.
+                // Their outlines are never painted: every text run uses NEITHER.
+                val fonts = HashMap<Int, PDType0Font>()
+                fun fontFor(codePoint: Int): PDType0Font {
+                    val plane = codePoint ushr 16
+                    require(plane in 0..3) { "Unsupported OCR Unicode plane" }
+                    return fonts.getOrPut(plane) {
+                        assets.open("flutter_assets/assets/fonts/PDFMateOCR$plane.ttf").use {
+                            PDType0Font.load(doc, it, false)
+                        }
+                    }
                 }
                 val changed = HashSet<COSDictionary>()
                 manifest.useLines { lines -> lines.forEach { raw ->
@@ -128,7 +138,14 @@ class MainActivity : FlutterActivity() {
                     val index = item.getInt("page")
                     require(index in 0 until doc.numberOfPages) { "Invalid OCR page index" }
                     val page = doc.getPage(index)
-                    val crop = page.cropBox
+                    val media = page.mediaBox
+                    val requested = page.cropBox
+                    val left = max(media.lowerLeftX, requested.lowerLeftX)
+                    val bottom = max(media.lowerLeftY, requested.lowerLeftY)
+                    val right = min(media.upperRightX, requested.upperRightX)
+                    val top = min(media.upperRightY, requested.upperRightY)
+                    val crop = if (right > left && top > bottom)
+                        PDRectangle(left, bottom, right - left, top - bottom) else media
                     val rotation = ((page.rotation % 360) + 360) % 360
                     val words = item.getJSONArray("words")
                     if (words.length() == 0) return@forEach
@@ -166,17 +183,33 @@ class MainActivity : FlutterActivity() {
                             val height = word.getDouble("height").toFloat()
                             require(width > 0 && height > 0 && width.isFinite() && height.isFinite()) { "Invalid OCR bounds" }
                             val size = max(1f, height * .82f)
-                            val textWidth = font.getStringWidth(text) / 1000f * size
+                            val runs = ArrayList<Pair<PDType0Font, String>>()
+                            var offset = 0
+                            while (offset < text.length) {
+                                val cp = text.codePointAt(offset)
+                                val font = fontFor(cp)
+                                val start = offset
+                                offset += Character.charCount(cp)
+                                while (offset < text.length && fontFor(text.codePointAt(offset)) === font) {
+                                    offset += Character.charCount(text.codePointAt(offset))
+                                }
+                                runs.add(Pair(font, text.substring(start, offset)))
+                            }
+                            val textWidth = runs.sumOf { (font, value) ->
+                                (font.getStringWidth(value) / 1000f * size).toDouble()
+                            }.toFloat()
                             require(textWidth > 0) { "Font cannot encode OCR text" }
                             val angle = -word.optDouble("angle", 0.0) * PI / 180.0
                             require(x.isFinite() && baseline.isFinite() && angle.isFinite()) { "Invalid OCR coordinates" }
                             stream.beginText()
-                            stream.setFont(font, size)
                             stream.setRenderingMode(RenderingMode.NEITHER)
                             stream.setHorizontalScaling(width / textWidth * 100f)
                             stream.setTextMatrix(Matrix(cos(angle).toFloat(), sin(angle).toFloat(),
                                 -sin(angle).toFloat(), cos(angle).toFloat(), x, viewHeight - baseline))
-                            stream.showText(text)
+                            for ((font, value) in runs) {
+                                stream.setFont(font, size)
+                                stream.showText(value)
+                            }
                             stream.endText()
                         }
                     }

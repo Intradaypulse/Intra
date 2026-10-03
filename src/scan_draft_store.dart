@@ -53,6 +53,18 @@ class ScanDraftStore {
     }
   }
 
+  /// Commit the destination before writing any PDF bytes. The stable session ID
+  /// also covers a process kill while the receipt itself is being published.
+  Future<File> reserveOutput(List<String> pages) async {
+    if (pages.isEmpty) throw ArgumentError('No scan pages');
+    final receipt = File('${File(pages.first).parent.path}/output.txt');
+    if (await receipt.exists()) return File(await receipt.readAsString());
+    final sessionId = File(pages.first).parent.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final output = File('${(await _directoryProvider()).path}/Scan_$sessionId.pdf');
+    await rememberOutput(pages, output);
+    return output;
+  }
+
   Future<File?> completedOutput(List<String> pages) async {
     final receipt = File('${File(pages.first).parent.path}/output.txt');
     if (!await receipt.exists()) return null;
@@ -63,7 +75,10 @@ class ScanDraftStore {
   Future<void> rememberOutput(List<String> pages, File output) async {
     final receipt = File('${File(pages.first).parent.path}/output.txt');
     final pending = File('${receipt.path}.pending');
-    await pending.writeAsString(output.path, flush: true);
-    await pending.rename(receipt.path);
+    _writing.add(pending.path);
+    try {
+      await pending.writeAsString(output.path, flush: true);
+      await pending.rename(receipt.path);
+    } finally { _writing.remove(pending.path); }
   }
 }

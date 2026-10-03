@@ -483,9 +483,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted || _busy) return;
     setState(() => _busy = true);
     try {
+      final destination = await _scanDrafts.reserveOutput(pages);
       final output = await _scanDrafts.completedOutput(pages) ??
-          await _service.createScannedPdfFromFiles(pages);
-      await _scanDrafts.rememberOutput(pages, output);
+          await _service.createScannedPdfFromFiles(pages, destination: destination);
       await _register(output);
       await _scanDrafts.discard(pages);
       if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
