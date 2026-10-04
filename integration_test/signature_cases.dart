@@ -50,9 +50,11 @@ void registerSignatureCases() {
 
       final pdf = pw.Document()..addPage(pw.Page(
         pageFormat: const pf.PdfPageFormat(400, 600), margin: pw.EdgeInsets.zero,
-        build: (_) => pw.Container(color: pf.PdfColors.red)));
+        build: (_) => pw.Container(width: 400, height: 600, color: pf.PdfColors.red)));
       final source = await File('${root.path}/red.pdf').writeAsBytes(await pdf.save());
       final before = img.decodeImage((await service.renderPage(source, 0, width: 800))!)!;
+      expect(before.getPixel(20, 20).r, greaterThan(240));
+      expect(before.getPixel(20, 20).g, lessThan(20));
       for (final angle in [0, 35]) {
         final rotated = img.copyRotate(ink, angle: angle, interpolation: img.Interpolation.linear);
         const width = 120.0;
@@ -60,12 +62,13 @@ void registerSignatureCases() {
         final signed = await service.stampSignatureAt(source, Uint8List.fromList(img.encodePng(rotated)),
           page: 0, rect: PdfRect(x: 40, y: 60, width: width, height: height));
         final after = img.decodeImage((await service.renderPage(signed, 0, width: 800))!)!;
-        final dark = after.where((p) => p.r < 80 && p.g < 80 && p.b < 80).toList();
+        final dark = after.where((p) => p.r < 80 && p.g < 80 && p.b < 80)
+          .map((p) => (p.x, p.y)).toList();
         expect(dark.length, greaterThan(300), reason: 'Visible black ink at angle $angle');
         // Check the actual persisted PDF, not just the Flutter preview.
         final top = (600 - 60 - height) * 2;
-        expect(dark.every((p) => p.x >= 78 && p.x <= 322 &&
-          p.y >= top - 2 && p.y <= 1082), isTrue);
+        expect(dark.every((p) => p.$1 >= 78 && p.$1 <= 322 &&
+          p.$2 >= top - 2 && p.$2 <= 1082), isTrue);
         var changed = 0;
         var white = 0;
         for (final pixel in after) {
