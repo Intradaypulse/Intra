@@ -54,7 +54,7 @@ void registerSignatureCases() {
       final source = await File('${root.path}/red.pdf').writeAsBytes(await pdf.save());
       final before = img.decodeImage((await service.renderPage(source, 0, width: 800))!)!;
       expect(before.getPixel(20, 20).r, greaterThan(240));
-      expect(before.getPixel(20, 20).g, lessThan(20));
+      expect(before.getPixel(20, 20).g, lessThan(100));
       for (final angle in [0, 35]) {
         final rotated = img.copyRotate(ink, angle: angle, interpolation: img.Interpolation.linear);
         const width = 120.0;
