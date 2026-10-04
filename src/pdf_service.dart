@@ -1628,6 +1628,14 @@ class PdfService {
     return result;
   }
 
+  Future<String> exportSignatureBackup(Uint8List bytes) async {
+    final file = await _newManagedTempFile('signature_backup', extension: 'json');
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      return await saveSignatureBackupToDownloads(file);
+    } finally { await secureDeleteTemporary(file); }
+  }
+
   Future<List<File>> pdfToJpgFromFile(
     File source, {
     String? password,

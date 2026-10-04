@@ -34,6 +34,17 @@ class _PasswordService extends PdfService {
   }
 }
 
+class _FailingBackupService extends PdfService {
+  _FailingBackupService(Directory temp) : super(temporaryDirectoryProvider: () async => temp);
+  File? observed;
+  @override Future<String> saveSignatureBackupToDownloads(File source) async {
+    observed = source;
+    expect(isManagedTemporaryFile(source), isTrue);
+    expect(await source.readAsString(), 'private backup');
+    throw const FileSystemException('Downloads unavailable');
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test('removed records preserve name date favorite and restore after a restart', () async {
@@ -91,6 +102,16 @@ void main() {
       await expectLater(store.restoreBackup(Uint8List(SignatureStore.maxBackupBytes + 1)), throwsFormatException);
       await expectLater(store.restoreBackup(Uint8List.fromList(utf8.encode('{"version":1}'))), throwsFormatException);
       expect(await store.load(), isEmpty);
+    } finally { await root.delete(recursive: true); }
+  });
+  test('failed signature backup export securely releases managed temporary ownership', () async {
+    final root = await Directory.systemTemp.createTemp('backup_temp_');
+    try {
+      final service = _FailingBackupService(root);
+      await expectLater(service.exportSignatureBackup(Uint8List.fromList(utf8.encode('private backup'))),
+        throwsA(isA<FileSystemException>()));
+      expect(await service.observed!.exists(), isFalse);
+      expect(service.isManagedTemporaryFile(service.observed!), isFalse);
     } finally { await root.delete(recursive: true); }
   });
   for (final tool in ['Split', 'Organizer', 'Compression', 'Sign']) {

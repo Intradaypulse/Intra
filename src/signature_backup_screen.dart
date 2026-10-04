@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'pdf_service.dart';
 import 'signature_store.dart';
 
@@ -29,14 +27,10 @@ class _SignatureBackupScreenState extends State<SignatureBackupScreen> {
   }
   Future<String> _export() async {
     final bytes = await _store.exportBackup();
-    final root = await getTemporaryDirectory();
-    final file = File('${root.path}/signature_backup_${DateTime.now().microsecondsSinceEpoch}.json');
-    try {
-      await file.writeAsBytes(bytes, flush: true);
-      await _service.saveSignatureBackupToDownloads(file);
-      return 'Signature backup saved to Downloads/PDFMate.';
-    } finally { if (await file.exists()) await file.delete(); }
+    await _service.exportSignatureBackup(bytes);
+    return 'Signature backup saved to Downloads/PDFMate.';
   }
+
   Future<String> _restore() async {
     final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['json']);
     if (picked == null) return 'Restore cancelled.';
