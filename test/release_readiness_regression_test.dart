@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -31,6 +32,20 @@ class _PasswordService extends PdfService {
   }
   @override Future<void> secureDeleteTemporary(File? file) async {
     if (file != null) deleted.add(file.path);
+  }
+}
+
+class _UiStore extends PdfFileStore {
+  final loaded = Completer<void>();
+  final restored = Completer<void>();
+  @override Future<List<PdfRecord>> loadRemoved() async {
+    final records = await super.loadRemoved();
+    if (!loaded.isCompleted) loaded.complete();
+    return records;
+  }
+  @override Future<void> restoreRemoved(PdfRecord record) async {
+    await super.restoreRemoved(record);
+    restored.complete();
   }
 }
 
@@ -165,13 +180,19 @@ void main() {
         await PdfFileStore().add(PdfRecord(path: file.path, name: 'Invoice', createdAt: DateTime(2020)));
         await PdfFileStore().removeFromLibrary(file.path);
       });
-      await tester.pumpWidget(MaterialApp(home: RemovedPdfsScreen(store: PdfFileStore())));
-      await tester.runAsync(() async { await Future<void>.delayed(const Duration(milliseconds: 100)); });
+      final store = _UiStore();
+      await tester.runAsync(() async {
+        await tester.pumpWidget(MaterialApp(home: RemovedPdfsScreen(store: store)));
+        await store.loaded.future;
+        await Future<void>.delayed(Duration.zero);
+      });
       await tester.pumpAndSettle();
       expect(find.text('Invoice'), findsOneWidget);
       await tester.runAsync(() async {
         await tester.tap(find.text('Restore'));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await store.restored.future;
+        await store.loadRemoved();
+        await Future<void>.delayed(Duration.zero);
       });
       await tester.pumpAndSettle();
       expect(find.text('No removed PDFs to restore.'), findsOneWidget);
