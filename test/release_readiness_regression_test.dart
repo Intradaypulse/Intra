@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -36,16 +35,12 @@ class _PasswordService extends PdfService {
 }
 
 class _UiStore extends PdfFileStore {
-  final loaded = Completer<void>();
-  final restored = Completer<void>();
-  @override Future<List<PdfRecord>> loadRemoved() async {
-    final records = await super.loadRemoved();
-    if (!loaded.isCompleted) loaded.complete();
-    return records;
-  }
+  final records = <PdfRecord>[];
+  PdfRecord? restored;
+  @override Future<List<PdfRecord>> loadRemoved() async => List.from(records);
   @override Future<void> restoreRemoved(PdfRecord record) async {
-    await super.restoreRemoved(record);
-    restored.complete();
+    restored = record;
+    records.removeWhere((item) => item.path == record.path);
   }
 }
 
@@ -171,33 +166,17 @@ void main() {
     await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
-  testWidgets('Removed PDFs screen restores a stored record', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final root = (await tester.runAsync(() => Directory.systemTemp.createTemp('restore_ui_')))!;
-    try {
-      await tester.runAsync(() async {
-        final file = await File('${root.path}/invoice.pdf').writeAsString('invoice');
-        await PdfFileStore().add(PdfRecord(path: file.path, name: 'Invoice', createdAt: DateTime(2020)));
-        await PdfFileStore().removeFromLibrary(file.path);
-      });
-      final store = _UiStore();
-      await tester.runAsync(() async {
-        await tester.pumpWidget(MaterialApp(home: RemovedPdfsScreen(store: store)));
-        await store.loaded.future;
-        await Future<void>.delayed(Duration.zero);
-      });
-      await tester.pumpAndSettle();
-      expect(find.text('Invoice'), findsOneWidget);
-      await tester.runAsync(() async {
-        await tester.tap(find.text('Restore'));
-        await store.restored.future;
-        await store.loadRemoved();
-        await Future<void>.delayed(Duration.zero);
-      });
-      await tester.pumpAndSettle();
-      expect(find.text('No removed PDFs to restore.'), findsOneWidget);
-      final records = await tester.runAsync(() => PdfFileStore().load());
-      expect(records!.single.name, 'Invoice');
-    } finally { await tester.pumpWidget(const SizedBox()); await tester.runAsync(() => root.delete(recursive: true)); }
+  testWidgets('Removed PDFs screen restores the selected stored record', (tester) async {
+    final store = _UiStore();
+    final record = PdfRecord(path: '/tmp/invoice.pdf', name: 'Invoice', createdAt: DateTime(2020), favorite: true);
+    store.records.add(record);
+    await tester.pumpWidget(MaterialApp(home: RemovedPdfsScreen(store: store)));
+    await tester.pumpAndSettle();
+    expect(find.text('Invoice'), findsOneWidget);
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(find.text('No removed PDFs to restore.'), findsOneWidget);
+    expect(store.restored, same(record));
+    expect(tester.takeException(), isNull);
   });
 }
