@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:signature/signature.dart';
 import 'signature_store.dart';
 import 'signature_backup_screen.dart';
+import 'signature_image.dart';
 
 class SignatureScreen extends StatefulWidget {
   const SignatureScreen({super.key, this.store});
@@ -45,9 +46,8 @@ class _SignatureScreenState extends State<SignatureScreen> {
     if (_exporting || _controller.isEmpty) return;
     setState(() => _exporting = true);
     try {
-      final Uint8List? bytes = await _controller.toPngBytes(width: 900, height: 400);
+      final bytes = await exportSignaturePng(_controller);
       if (!mounted) return;
-      if (bytes == null) throw StateError('Could not export signature.');
       if (_saveForReuse && (!listEquals(_lastSaved, bytes) || _lastSavedName != _name.text.trim())) {
         await _store.save(_name.text, bytes);
         _lastSaved = bytes;
@@ -103,7 +103,7 @@ class _SignatureScreenState extends State<SignatureScreen> {
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
         )));
       if (selected == null) return;
-      final bytes = await selected.file.readAsBytes();
+      final bytes = trimSignaturePng(await selected.file.readAsBytes());
       if (mounted) Navigator.pop(context, bytes);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not load signatures: $e')));

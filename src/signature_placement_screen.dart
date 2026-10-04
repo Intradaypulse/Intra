@@ -13,6 +13,7 @@ import 'pdf_password_dialog.dart';
 import 'lru_future_cache.dart';
 import 'signature_screen.dart';
 import 'signature_geometry.dart';
+import 'signature_image.dart';
 
 class SignaturePlacementScreen extends StatefulWidget {
   const SignaturePlacementScreen({super.key, required this.service, this.initialSignature});
@@ -168,11 +169,13 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
 
   void _updateSignatureImage() {
     if (!identical(_cachedSignature, _signature)) {
-      final decoded = _signature == null ? null : img.decodePng(_signature!);
+      if (_signature == null) return;
+      final trimmed = trimSignaturePng(_signature!);
+      final decoded = img.decodePng(trimmed);
       if (decoded == null) return;
       _imageWidth = decoded.width.toDouble();
       _imageHeight = decoded.height.toDouble();
-      _placedSignature = _signature;
+      _placedSignature = trimmed;
       _cachedSignature = _signature;
     }
     final angle = _rotationDegrees * math.pi / 180;
@@ -225,7 +228,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
 
   Future<void> _save() async {
     final source = _source;
-    final signature = _signature;
+    final signature = _placedSignature;
     if (_busy || source == null || signature == null || _pageInfos.isEmpty || _preview == null) return;
 
     setState(() {

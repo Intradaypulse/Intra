@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'unicode_overlay_cases.dart';
 import 'deep_audit_cases.dart';
 import 'performance_cases.dart';
+import 'signature_cases.dart';
 
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -26,6 +27,7 @@ void main() {
   registerUnicodeOverlayCases();
   registerDeepAuditCases();
   registerPerformanceCases();
+  registerSignatureCases();
 
   testWidgets('Android removed PDF listing restores bytes and metadata through the screen', (tester) async {
     final root = await getApplicationDocumentsDirectory();

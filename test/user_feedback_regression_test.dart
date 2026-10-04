@@ -142,7 +142,11 @@ void main() {
       final saved = await tester.runAsync(() => SignatureStore(directoryProvider: () async => root).load());
       expect(saved, hasLength(1));
       final bytes = await tester.runAsync(() => saved!.single.file.readAsBytes());
-      expect(img.decodePng(bytes!), isNotNull);
+      final signature = img.decodePng(bytes!)!;
+      // A 90x30 drawing must not become a mostly empty 900x400 image.
+      expect(signature.width, inInclusiveRange(90, 110));
+      expect(signature.height, inInclusiveRange(30, 50));
+      expect(signature.getPixel(0, 0).a, 0);
       expect(find.text('Draw signature'), findsOneWidget);
       expect(find.text('Signature saved for reuse.'), findsOneWidget);
       expect(tester.takeException(), isNull);
