@@ -89,6 +89,12 @@ class _OcrPagePreviewScreenState extends State<OcrPagePreviewScreen> {
     final lines = preview == null ? <_OcrHit>[] : _hits(preview);
     return PopScope(canPop: !_busy, child: Scaffold(
       appBar: AppBar(title: Text('Copy text • page ${_page + 1}')),
+      bottomNavigationBar: SafeArea(child: Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
+          IconButton(tooltip: 'Previous page', onPressed: _busy || _page <= 0 ? null : () { _page--; _load(); }, icon: const Icon(Icons.chevron_left)),
+          OutlinedButton(onPressed: preview == null || _selected.isEmpty ? null : () => _copy(false), child: const Text('Copy selected')),
+          FilledButton(onPressed: preview == null || lines.isEmpty ? null : () => _copy(true), child: const Text('Copy page')),
+          IconButton(tooltip: 'Next page', onPressed: _busy || _page >= widget.pageCount - 1 ? null : () { _page++; _load(); }, icon: const Icon(Icons.chevron_right)),
+        ])),
       body: SafeArea(child: Column(children: [
         Padding(padding: const EdgeInsets.all(12), child: DropdownButtonFormField<TextRecognitionScript>(
           initialValue: _script, isExpanded: true,
@@ -143,12 +149,7 @@ class _OcrPagePreviewScreenState extends State<OcrPagePreviewScreen> {
               ]),
             )));
           })),
-        Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
-          IconButton(tooltip: 'Previous page', onPressed: _busy || _page <= 0 ? null : () { _page--; _load(); }, icon: const Icon(Icons.chevron_left)),
-          OutlinedButton(onPressed: preview == null || _selected.isEmpty ? null : () => _copy(false), child: const Text('Copy selected')),
-          FilledButton(onPressed: preview == null || lines.isEmpty ? null : () => _copy(true), child: const Text('Copy page')),
-          IconButton(tooltip: 'Next page', onPressed: _busy || _page >= widget.pageCount - 1 ? null : () { _page++; _load(); }, icon: const Icon(Icons.chevron_right)),
-        ]),
+
       ])),
     ));
   }
