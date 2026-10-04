@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "637168665685",
+    "project_id": "scanlumo",
+    "storage_bucket": "scanlumo.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:637168665685:android:f61330d64a9795b47c00dc",
+        "android_client_info": {
+          "package_name": "com.pdfmateapp.pdfmate"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHa_Q3kYxtCegTeNjpPxTeU0TZeu571rQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

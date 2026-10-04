@@ -36,6 +36,11 @@ Production workflow and readiness checks use these as fallbacks; matching reposi
 - `FIREBASE_MESSAGING_SENDER_ID`
 - `FIREBASE_STORAGE_BUCKET`
 
+### Supplied Firebase project
+`config/google-services.json` is the owner-provided Android client configuration for project `scanlumo`, registered for `com.pdfmateapp.pdfmate`. It contains client SDK identifiers, not a service-account private key. Release/preflight environment values use these supplied values as fallbacks, with repository Secrets or Variables taking precedence. The release workflow generates the matching native configuration and passes the same values to Dart.
+
+Analytics, Crashlytics and Remote Config code are present, but receiving live events is not verified by configuration alone. Beta artifacts continue their existing test-ad/no-live-Firebase setup. Production activation still requires established signing and public operator/privacy configuration. No Firebase Admin SDK credential or remote admin-panel publishing access has been granted.
+
 ## Public repository variables
 Set these under **Settings → Secrets and variables → Actions → Variables**:
 - `ANDROID_UPLOAD_CERT_SHA256` — SHA-256 of the DER certificate for the existing Play upload key. The release rejects a different key instead of silently changing the signing identity. Play App Signing may use a separate app signing certificate; use Play testing tracks to verify updates of Play-installed apps.
