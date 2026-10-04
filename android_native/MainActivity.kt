@@ -12,9 +12,13 @@ import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.text.TextPosition
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -29,6 +33,7 @@ import kotlin.math.*
 
 /** A single worker keeps PDF parsing/writing off Android's UI thread. */
 class MainActivity : FlutterActivity() {
+    private class OwnerPasswordRequiredException : Exception("This PDF disallows content changes. Enter the owner password.")
     private val pdfWorker = Executors.newSingleThreadExecutor()
     private val ownedCancellations = ConcurrentHashMap<String, AtomicBoolean>()
     companion object {
@@ -55,13 +60,15 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                     return@setMethodCallHandler
                 }
-                if (call.method != "append") { result.notImplemented(); return@setMethodCallHandler }
+                if (call.method != "append" && call.method != "checkModify" && call.method != "stampSignature") { result.notImplemented(); return@setMethodCallHandler }
                 val source = call.argument<String>("source")
                 val output = call.argument<String>("output")
                 val manifest = call.argument<String>("manifest")
+                val signature = call.argument<ByteArray>("image")
                 val password = call.argument<String>("password") ?: ""
                 val token = call.argument<String>("token") ?: java.util.UUID.randomUUID().toString()
-                if (source == null || output == null || manifest == null) {
+                if (source == null || (call.method == "append" && (output == null || manifest == null)) ||
+                    (call.method == "stampSignature" && (output == null || signature == null))) {
                     result.error("ARGUMENT", "Missing document paths", null)
                     return@setMethodCallHandler
                 }
@@ -70,11 +77,30 @@ class MainActivity : FlutterActivity() {
                 ownedCancellations[token] = cancelled
                 pdfWorker.execute {
                     try {
-                        appendOverlay(File(source), File(output), File(manifest), password, cancelled)
+                        if (call.method == "checkModify") {
+                            PDDocument.load(File(source), password, MemoryUsageSetting.setupTempFileOnly().setTempDir(cacheDir)).use { doc ->
+                                if (!doc.currentAccessPermission.canModify()) throw OwnerPasswordRequiredException()
+                            }
+                        } else if (call.method == "stampSignature") {
+                            appendSignature(File(source), File(output!!), signature!!,
+                                call.argument<Int>("page") ?: -1,
+                                (call.argument<Number>("x") ?: Double.NaN).toFloat(),
+                                (call.argument<Number>("y") ?: Double.NaN).toFloat(),
+                                (call.argument<Number>("width") ?: Double.NaN).toFloat(),
+                                (call.argument<Number>("height") ?: Double.NaN).toFloat(),
+                                password, cancelled)
+                        } else {
+                            appendOverlay(File(source), File(output!!), File(manifest!!), password, cancelled)
+                        }
                         Handler(Looper.getMainLooper()).post { result.success(null) }
                     } catch (error: Exception) {
                         Handler(Looper.getMainLooper()).post {
-                            result.error("OCR_OVERLAY", error.message ?: "Could not add OCR layer", null)
+                            val code = when (error) {
+                                is OwnerPasswordRequiredException -> "OCR_OWNER_PASSWORD_REQUIRED"
+                                is InvalidPasswordException -> "OCR_WRONG_PASSWORD"
+                                else -> if (call.method == "stampSignature") "SIGNATURE_SAVE" else "OCR_OVERLAY"
+                            }
+                            result.error(code, error.message ?: "Could not add OCR layer", null)
                         }
                     } finally {
                         cancellations.remove(token, cancelled)
@@ -88,6 +114,38 @@ class MainActivity : FlutterActivity() {
         ownedCancellations.values.forEach { it.set(true) }
         pdfWorker.shutdown()
         super.onDestroy()
+    }
+
+    private fun appendSignature(source: File, output: File, image: ByteArray,
+                                pageIndex: Int, x: Float, y: Float, width: Float, height: Float,
+                                password: String, cancelled: AtomicBoolean) {
+        require(source.canonicalPath != output.canonicalPath) { "Output must be a new copy" }
+        require(!output.exists()) { "Output already exists" }
+        require(x.isFinite() && y.isFinite() && width.isFinite() && height.isFinite() &&
+            width > 0 && height > 0 && image.isNotEmpty()) { "Invalid signature bounds" }
+        check(!cancelled.get()) { "Signature cancelled" }
+        try {
+            val memory = MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(cacheDir)
+            PDDocument.load(source, password, memory).use { doc ->
+                if (!doc.currentAccessPermission.canModify()) throw OwnerPasswordRequiredException()
+                require(pageIndex in 0 until doc.numberOfPages) { "Invalid signature page" }
+                val page = doc.getPage(pageIndex)
+                val ink = PDImageXObject.createFromByteArray(doc, image, "signature.png")
+                check(!cancelled.get()) { "Signature cancelled" }
+                // Reset inherited transforms/clipping. Draw directly into page
+                // content so Android PdfRenderer and external viewers show it.
+                PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use {
+                    it.drawImage(ink, x, y, width, height)
+                }
+                // PDFBox closes the supplied stream itself.
+                CancellableOutputStream(FileOutputStream(output), cancelled).use { doc.save(it) }
+                check(!cancelled.get()) { "Signature cancelled" }
+                FileOutputStream(output, true).use { it.fd.sync() }
+            }
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        }
     }
 
     private fun appendOverlay(source: File, output: File, manifest: File, password: String,
@@ -110,16 +168,23 @@ class MainActivity : FlutterActivity() {
             }
             val memory = MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(scratch)
             PDDocument.load(source, password, memory).use { doc ->
-                require(doc.currentAccessPermission.canModify()) {
-                    "This PDF disallows content changes. Open it with the owner password."
-                }
+                if (!doc.currentAccessPermission.canModify()) throw OwnerPasswordRequiredException()
                 // Certified documents can forbid content changes even in a new revision.
                 val permissions = doc.documentCatalog.cosObject.getCOSDictionary(COSName.PERMS)
                 require(permissions?.getDictionaryObject(COSName.DOCMDP) == null) {
                     "This certified PDF forbids an OCR content update. Extract text instead."
                 }
-                val font = assets.open("flutter_assets/assets/fonts/NotoSansDevanagariOCR.ttf").use {
-                    PDType0Font.load(doc, it, false)
+                // Dedicated OCR-only fonts preserve logical Unicode, including CJK.
+                // Their outlines are never painted: every text run uses NEITHER.
+                val fonts = HashMap<Int, PDType0Font>()
+                fun fontFor(codePoint: Int): PDType0Font {
+                    val plane = codePoint ushr 16
+                    require(plane in 0..3) { "Unsupported OCR Unicode plane" }
+                    return fonts.getOrPut(plane) {
+                        assets.open("flutter_assets/assets/fonts/PDFMateOCR$plane.ttf").use {
+                            PDType0Font.load(doc, it, false)
+                        }
+                    }
                 }
                 val changed = HashSet<COSDictionary>()
                 manifest.useLines { lines -> lines.forEach { raw ->
@@ -128,7 +193,14 @@ class MainActivity : FlutterActivity() {
                     val index = item.getInt("page")
                     require(index in 0 until doc.numberOfPages) { "Invalid OCR page index" }
                     val page = doc.getPage(index)
-                    val crop = page.cropBox
+                    val media = page.mediaBox
+                    val requested = page.cropBox
+                    val left = max(media.lowerLeftX, requested.lowerLeftX)
+                    val bottom = max(media.lowerLeftY, requested.lowerLeftY)
+                    val right = min(media.upperRightX, requested.upperRightX)
+                    val top = min(media.upperRightY, requested.upperRightY)
+                    val crop = if (right > left && top > bottom)
+                        PDRectangle(left, bottom, right - left, top - bottom) else media
                     val rotation = ((page.rotation % 360) + 360) % 360
                     val words = item.getJSONArray("words")
                     if (words.length() == 0) return@forEach
@@ -166,18 +238,41 @@ class MainActivity : FlutterActivity() {
                             val height = word.getDouble("height").toFloat()
                             require(width > 0 && height > 0 && width.isFinite() && height.isFinite()) { "Invalid OCR bounds" }
                             val size = max(1f, height * .82f)
-                            val textWidth = font.getStringWidth(text) / 1000f * size
+                            val runs = ArrayList<Pair<PDType0Font, String>>()
+                            var offset = 0
+                            while (offset < text.length) {
+                                val cp = text.codePointAt(offset)
+                                val font = fontFor(cp)
+                                val start = offset
+                                offset += Character.charCount(cp)
+                                while (offset < text.length && fontFor(text.codePointAt(offset)) === font) {
+                                    offset += Character.charCount(text.codePointAt(offset))
+                                }
+                                runs.add(Pair(font, text.substring(start, offset)))
+                            }
+                            val textWidth = runs.sumOf { (font, value) ->
+                                (font.getStringWidth(value) / 1000f * size).toDouble()
+                            }.toFloat()
                             require(textWidth > 0) { "Font cannot encode OCR text" }
                             val angle = -word.optDouble("angle", 0.0) * PI / 180.0
                             require(x.isFinite() && baseline.isFinite() && angle.isFinite()) { "Invalid OCR coordinates" }
+                            // Preserve one logical word even when a Unicode-plane
+                            // change requires several font runs. Readers must not
+                            // reorder those runs as independent layout regions.
+                            val semantics = COSDictionary()
+                            semantics.setString(COSName.getPDFName("ActualText"), text)
+                            stream.beginMarkedContent(COSName.getPDFName("Span"), PDPropertyList.create(semantics))
                             stream.beginText()
-                            stream.setFont(font, size)
                             stream.setRenderingMode(RenderingMode.NEITHER)
                             stream.setHorizontalScaling(width / textWidth * 100f)
                             stream.setTextMatrix(Matrix(cos(angle).toFloat(), sin(angle).toFloat(),
                                 -sin(angle).toFloat(), cos(angle).toFloat(), x, viewHeight - baseline))
-                            stream.showText(text)
+                            for ((font, value) in runs) {
+                                stream.setFont(font, size)
+                                stream.showText(value)
+                            }
                             stream.endText()
+                            stream.endMarkedContent()
                         }
                     }
                     changed.add(page.cosObject)

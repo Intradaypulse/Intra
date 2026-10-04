@@ -161,7 +161,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         child: Text(
                           _page == _items.length - 1
-                              ? 'Start using PDFMate'
+                              ? 'Start using ScanLumo'
                               : 'Continue',
                         ),
                       ),

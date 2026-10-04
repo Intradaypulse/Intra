@@ -60,7 +60,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Your files stay under your control'), findsOneWidget);
 
-    await tester.tap(find.text('Start using PDFMate'));
+    await tester.tap(find.text('Start using ScanLumo'));
     await tester.pump();
     expect(finished, isTrue);
   });

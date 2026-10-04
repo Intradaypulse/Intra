@@ -21,9 +21,12 @@ import 'telemetry_service.dart';
 import 'signature_placement_screen.dart';
 import 'ads_service.dart';
 import 'file_store.dart';
+import 'removed_pdfs_screen.dart';
 import 'live_scanner_screen.dart';
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
+import 'pdf_password_dialog.dart';
+import 'pdf_name_dialog.dart';
 import 'pdf_viewer.dart';
 import 'scan_draft_store.dart';
 
@@ -111,7 +114,7 @@ class _PDFMateAppState extends State<PDFMateApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'PDFMate',
+      title: 'ScanLumo',
       theme: pdfMateTheme(Brightness.light),
       darkTheme: pdfMateTheme(Brightness.dark),
       themeMode: _themeMode,
@@ -157,7 +160,7 @@ class _LaunchScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              'PDFMate',
+              'ScanLumo',
               style: Theme.of(
                 context,
               ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
@@ -264,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _recoverFiles() async {
     try {
       final outputs = await _service.recoverableOutputs();
-      await _store.addMany([for (final file in outputs)
+      await _store.recoverMissing([for (final file in outputs)
         PdfRecord(path: file.path, name: file.uri.pathSegments.last,
           createdAt: await file.lastModified())]);
       await _loadFiles();
@@ -357,7 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialBanner(
         content: Text(
           automatic
-              ? 'PDF is safe inside PDFMate, but the Downloads backup failed. '
+              ? 'PDF is safe inside ScanLumo, but the Downloads backup failed. '
                     'Retry to create the external copy.'
               : 'Could not save the PDF to Downloads: $error',
         ),
@@ -472,20 +475,49 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _scan() async {
+  Future<void> _scan({bool photoMode = false}) async {
     final pages = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(builder: (_) => const LiveScannerScreen()),
+      MaterialPageRoute(builder: (_) => LiveScannerScreen(photoMode: photoMode)),
     );
-    if (pages != null && pages.isNotEmpty) await _saveScan(pages);
+    if (pages == null || pages.isEmpty || !mounted) return;
+    final format = await showDialog<String>(context: context, builder: (context) => SimpleDialog(
+      title: const Text('Save captured images'),
+      children: [
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 'jpg'), child: const Text('Save JPG images to Gallery')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 'pdf'), child: const Text('Convert to PDF')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 'both'), child: const Text('Save JPG images, then create PDF')),
+      ],
+    ));
+    if (format != null) await _saveCaptured(pages, format);
+  }
+
+  Future<void> _saveCaptured(List<String> pages, String format) async {
+    if (!mounted || _busy) return;
+    if (format == 'pdf') { await _saveScan(pages); return; }
+    setState(() => _busy = true);
+    var saved = false;
+    try {
+      await _scanDrafts.exportJpgs(pages, _service.saveJpgToGallery);
+      if (format == 'jpg') { await _scanDrafts.discard(pages); }
+      saved = true;
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved ${pages.length} JPG image(s) to Gallery'))); }
+    } catch (error) {
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('JPG export incomplete: $error. Captured images are retained.'),
+        action: SnackBarAction(label: 'Retry', onPressed: () => _saveCaptured(pages, format)),
+      )); }
+    } finally { if (mounted) setState(() => _busy = false); }
+    if (saved && format == 'both') { await _saveScan(pages); }
   }
 
   Future<void> _saveScan(List<String> pages) async {
     if (!mounted || _busy) return;
     setState(() => _busy = true);
     try {
+      final destination = await _scanDrafts.reserveOutput(pages);
       final output = await _scanDrafts.completedOutput(pages) ??
-          await _service.createScannedPdfFromFiles(pages);
-      await _scanDrafts.rememberOutput(pages, output);
+          await _service.createScannedPdfFromFiles(pages, destination: destination);
       await _register(output);
       await _scanDrafts.discard(pages);
       if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
@@ -637,7 +669,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _busy = true);
     File? textFile;
     try {
-      final result = await _service.extractPdfTextToFile();
+      final result = await _service.extractPdfTextToFile(requestPassword: (wrong) async {
+        if (!mounted) return null;
+        return askPdfPassword(context,
+          title: wrong ? 'Wrong password. Try again' : 'PDF password');
+      });
       if (result == null) return;
       textFile = result.$1;
       final text = result.$2;
@@ -662,8 +698,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 try {
                   await SharePlus.instance.share(ShareParams(files: [XFile(textFile!.path)]));
                 } catch (error) {
-                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Sharing failed. Please retry: $error')));
+                  if (context.mounted) { ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
                 }
               },
               icon: const Icon(Icons.share_outlined),
@@ -702,9 +738,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_externalAction) return;
     _externalAction = true;
     try {
-      await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'));
+      await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with ScanLumo'));
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error')));
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
     } finally { _externalAction = false; }
   }
 
@@ -731,35 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
       RegExp(r'\.pdf$', caseSensitive: false),
       '',
     );
-    final controller = TextEditingController(text: current);
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename PDF'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            suffixText: '.pdf',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final name = controller.text.trim();
-              if (name.isNotEmpty) Navigator.pop(context, name);
-            },
-            child: const Text('Rename'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final value = await askPdfName(context, initialName: current);
     if (value == null) return;
 
     try {
@@ -781,28 +789,49 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _delete(PdfRecord record) async {
     if (!_recordOperations.add(record.path)) return;
     try {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete PDF?'),
-        content: Text(record.name),
+        title: const Text('Remove PDF'),
+        content: Text('${record.name}\n\nRemove from My PDFs keeps the file on your device. Delete from device permanently removes this file.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'device'),
+            child: const Text('Delete from device'),
+          ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            onPressed: () => Navigator.pop(context, 'library'),
+            child: const Text('Remove from My PDFs'),
           ),
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed == null) return;
     final file = File(record.path);
-    if (await file.exists()) await file.delete();
-    await _store.remove(record.path);
+    if (confirmed == 'device') {
+      if (await file.exists()) await file.delete();
+      await _store.remove(record.path);
+    } else {
+      await _store.removeFromLibrary(record.path);
+    }
     await _loadFiles();
+    if (confirmed == 'library' && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Removed from My PDFs. Storage file kept.'),
+        action: SnackBarAction(label: 'Undo', onPressed: () async {
+          try {
+            await _store.restoreRemoved(record);
+            await _loadFiles();
+          } catch (_) {
+            if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not restore PDF. Try Removed PDFs.'))); }
+          }
+        })));
+    }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete PDF: $e')));
     } finally { _recordOperations.remove(record.path); }
@@ -844,10 +873,16 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(Icons.picture_as_pdf_rounded),
             SizedBox(width: 10),
-            Text('PDFMate Beta'),
+            Text('ScanLumo Beta'),
           ],
         ),
         actions: [
+          IconButton(tooltip: 'Removed PDFs', icon: const Icon(Icons.restore_page_outlined),
+            onPressed: _busy ? null : () async {
+              await Navigator.of(context).push<void>(MaterialPageRoute(
+                builder: (_) => RemovedPdfsScreen(store: _store)));
+              await _loadFiles();
+            }),
           if (AdsService.instance.privacyOptionsRequired)
             IconButton(
               tooltip: 'Privacy choices',
@@ -944,6 +979,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisSpacing: 12,
                     childAspectRatio: 1.42,
                     children: [
+                      _ToolCard(
+                        icon: Icons.camera_alt_outlined,
+                        title: 'Camera photo', subtitle: 'Original photo • JPG / PDF',
+                        onTap: _busy ? null : () => _scan(photoMode: true),
+                      ),
                       _ToolCard(
                         icon: Icons.image_rounded,
                         title: 'Image to PDF',

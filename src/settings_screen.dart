@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'ads_service.dart';
 import 'privacy_policy_screen.dart';
 import 'telemetry_service.dart';
+import 'signature_backup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -207,6 +208,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 18),
+          ListTile(leading: const Icon(Icons.backup_outlined), title: const Text('Signature backup'),
+            subtitle: const Text('Save or restore your reusable signatures'),
+            onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(
+              builder: (_) => const SignatureBackupScreen()))),
           Text(
             'About',
             style: Theme.of(context).textTheme.titleMedium,
@@ -217,7 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 ListTile(
                   leading: Icon(Icons.picture_as_pdf_rounded),
-                  title: Text('PDFMate'),
+                  title: Text('ScanLumo'),
                   subtitle: Text('Advanced beta • on-device PDF toolkit'),
                 ),
                 Divider(height: 1),

@@ -87,3 +87,10 @@ wall-clock cancellation deadline. Repeat and confirm a subsequent save succeeds.
   three pages in source order; scrolling must not render all page thumbnails.
 - Appearance: select Dark and check true black background, text contrast, rounded
   glass cards and performance on a low-end phone. Test the signature keyboard.
+
+## New restore and performance checks
+- Remove a PDF from My PDFs; Undo and Removed PDFs → Restore must preserve its bytes, name, creation date and favorite. Repeat after restarting. Permanent deletion must remain an explicit device-delete choice.
+- Save a signature backup to Downloads/PDFMate. Restore on a clean test installation, repeat import, and verify no duplicates. Invalid backup entries must not overwrite any signature.
+- During signing, pinch/rotate outside the small signature. Live transforms should remain responsive; inspect the exported angle, bounds and page position.
+- Emulator CI now exercises Android API 24, 29 and 35. Synthetic benchmarks index/split 300 pages and convert two 12MP JPEGs; logs report elapsed time and before/after RSS. These measurements do not substitute for low-end phone peak-memory measurement or real OCR accuracy.
+- For real OCR accuracy, use independently transcribed printed documents, poor-light photos, skewed pages and Latin/Hindi mixed text. Record missing/wrong words and manually inspect word-selection alignment. Handwriting accuracy is not guaranteed by the current recognizer.
