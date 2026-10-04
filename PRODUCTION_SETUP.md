@@ -23,8 +23,9 @@ The owner supplied these public IDs on 4 October 2026:
 - App: `ca-app-pub-4375542757188713~4072508265`
 - Banner (`scan`): `ca-app-pub-4375542757188713/3974279220`
 - Interstitial (`scan Interstitial`): `ca-app-pub-4375542757188713/8696122864`
+- Rewarded: `ca-app-pub-4375542757188713/3609559552`
 
-Production workflow and readiness checks use these as fallbacks; matching repository Secrets or Variables override them. Rewarded and App-Open IDs are still required. Supplying identifiers does not verify AdMob readiness or ad serving. Beta APKs retain test ad configuration. This mapping does not rename the app or change its package identity.
+Production workflow and readiness checks use these as fallbacks; matching repository Secrets or Variables override them. App-Open ID is still required. Supplying identifiers does not verify AdMob readiness or ad serving. Beta APKs retain test ad configuration. This mapping does not rename the app or change its package identity.
 
 
 ## Firebase
