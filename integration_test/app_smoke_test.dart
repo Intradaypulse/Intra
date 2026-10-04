@@ -13,6 +13,9 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/live_scanner_screen.dart';
+import 'package:pdfmate/file_store.dart';
+import 'package:pdfmate/removed_pdfs_screen.dart';
+import 'package:pdfmate/signature_store.dart';
 import 'package:pdfmate/main.dart' as app;
 import 'package:pdfmate/pdf_service.dart';
 
@@ -22,6 +25,50 @@ void main() {
   registerUnicodeOverlayCases();
   registerDeepAuditCases();
   registerPerformanceCases();
+
+  testWidgets('Android removed PDF listing restores bytes and metadata through the screen', (tester) async {
+    final root = await getApplicationDocumentsDirectory();
+    final source = File('${root.path}/qa_restore.pdf');
+    final store = PdfFileStore();
+    final doc = pw.Document()..addPage(pw.Page(build: (_) => pw.Text('Restore invoice')));
+    await source.writeAsBytes(await doc.save());
+    final bytes = await source.readAsBytes();
+    final record = PdfRecord(path: source.path, name: 'Restore invoice', createdAt: DateTime(2020), favorite: true);
+    try {
+      await store.add(record);
+      await store.removeFromLibrary(source.path);
+      expect((await PdfFileStore().loadRemoved()).singleWhere((item) => item.path == source.path).toJson(), record.toJson());
+      await tester.pumpWidget(MaterialApp(home: RemovedPdfsScreen(store: PdfFileStore())));
+      await _waitFor(tester, find.text('Restore invoice'));
+      await tester.tap(find.text('Restore'));
+      await _waitFor(tester, find.text('PDF restored to My PDFs.'));
+      expect((await PdfFileStore().load()).singleWhere((item) => item.path == source.path).toJson(), record.toJson());
+      expect(await source.readAsBytes(), bytes);
+    } finally {
+      await store.remove(source.path);
+      if (await source.exists()) await source.delete();
+    }
+  });
+
+  testWidgets('Android signature backup exports to Downloads and restores without duplicates', (tester) async {
+    final root = await getApplicationDocumentsDirectory();
+    final original = Directory('${root.path}/qa_signature_original');
+    final restored = Directory('${root.path}/qa_signature_restored');
+    try {
+      final store = SignatureStore(directoryProvider: () async => original);
+      final bytes = Uint8List.fromList(img.encodePng(img.Image(width: 100, height: 40)));
+      await store.save('Owner', bytes);
+      final backup = await store.exportBackup();
+      expect(await PdfService().exportSignatureBackup(backup), isNotEmpty);
+      final target = SignatureStore(directoryProvider: () async => restored);
+      expect(await target.restoreBackup(backup), 1);
+      expect(await target.restoreBackup(backup), 0);
+      expect(await (await target.load()).single.file.readAsBytes(), bytes);
+    } finally {
+      if (await original.exists()) await original.delete(recursive: true);
+      if (await restored.exists()) await restored.delete(recursive: true);
+    }
+  });
 
   testWidgets('camera still JPEG is preserved and converts to a one-page PDF', (tester) async {
     final cameras = await availableCameras();
