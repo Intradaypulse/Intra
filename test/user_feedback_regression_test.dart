@@ -76,10 +76,10 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final root = await Directory.systemTemp.createTemp('signature_gesture_');
+    final root = (await tester.runAsync(() => Directory.systemTemp.createTemp('signature_gesture_')))!;
     try {
       final doc = pw.Document()..addPage(pw.Page(build: (_) => pw.Text('Sign here')));
-      final source = await File('${root.path}/page.pdf').writeAsBytes(await doc.save());
+      final source = (await tester.runAsync(() async => File('${root.path}/page.pdf').writeAsBytes(await doc.save())))!;
       final infos = await tester.runAsync(() => PdfService().pageInfos(source));
       final png = Uint8List.fromList(img.encodePng(img.Image(width: 100, height: 40)));
       await tester.pumpWidget(MaterialApp(home: SignaturePlacementScreen(
@@ -115,7 +115,7 @@ void main() {
       expect(tester.takeException(), isNull);
     } finally {
       await tester.pumpWidget(const SizedBox());
-      await root.delete(recursive: true);
+      await tester.runAsync(() => root.delete(recursive: true));
     }
   });
   testWidgets('explicit signature Save persists PNG without leaving drawing screen', (tester) async {
@@ -123,7 +123,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final root = await Directory.systemTemp.createTemp('signature_ui_');
+    final root = (await tester.runAsync(() => Directory.systemTemp.createTemp('signature_ui_')))!;
     try {
       await tester.pumpWidget(MaterialApp(home: SignatureScreen(
         store: SignatureStore(directoryProvider: () async => root))));
@@ -133,6 +133,10 @@ void main() {
       await tester.runAsync(() async {
         await tester.tap(find.text('Save signature'));
         await tester.pump();
+        final store = SignatureStore(directoryProvider: () async => root);
+        for (var i = 0; i < 50 && (await store.load()).isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
       });
       await tester.pumpAndSettle();
       final saved = await tester.runAsync(() => SignatureStore(directoryProvider: () async => root).load());
@@ -144,7 +148,7 @@ void main() {
       expect(tester.takeException(), isNull);
     } finally {
       await tester.pumpWidget(const SizedBox());
-      await root.delete(recursive: true);
+      await tester.runAsync(() => root.delete(recursive: true));
     }
   });
 }
