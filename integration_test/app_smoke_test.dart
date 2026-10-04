@@ -113,7 +113,7 @@ void main() {
         await _settle(tester);
       }
 
-      expect(find.text('PDFMate Beta'), findsOneWidget);
+      expect(find.text('ScanLumo Beta'), findsOneWidget);
       expect(find.text('Scan document'), findsOneWidget);
 
       debugPrint('SMOKE: home ready, opening settings');
@@ -178,7 +178,7 @@ void main() {
 
       await tester.pageBack();
       await _settle(tester);
-      expect(find.text('PDFMate Beta'), findsOneWidget);
+      expect(find.text('ScanLumo Beta'), findsOneWidget);
       debugPrint('SMOKE: lifecycle checks complete');
     },
     timeout: const Timeout(Duration(minutes: 3)),

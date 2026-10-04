@@ -102,7 +102,7 @@ class SignatureStore {
     if (backup.length > maxBackupBytes) throw const FormatException('Signature backup is too large.');
     final value = jsonDecode(utf8.decode(backup));
     if (value is! Map || value['format'] != 'pdfmate-signatures' || value['version'] != 1 ||
-        value['signatures'] is! List) { throw const FormatException('Not a PDFMate signature backup.'); }
+        value['signatures'] is! List) { throw const FormatException('Not a ScanLumo signature backup.'); }
     final entries = value['signatures'] as List;
     if (entries.isEmpty || entries.length > 100) throw const FormatException('Invalid signature count.');
     final directory = await _directory();

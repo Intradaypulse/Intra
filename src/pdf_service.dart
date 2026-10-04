@@ -1619,7 +1619,7 @@ class PdfService {
 
   Future<String> saveSignatureBackupToDownloads(File source) async {
     final result = await _withLegacyStoragePermission(() => FileSaver.instance.saveToDownloads(
-      name: 'PDFMate-signatures-${DateTime.now().millisecondsSinceEpoch}',
+      name: 'ScanLumo-signatures-${DateTime.now().millisecondsSinceEpoch}',
       filePath: source.path, fileExtension: 'json', mimeType: MimeType.custom,
       customMimeType: 'application/json', subfolder: 'PDFMate'));
     if (result == null || result.trim().isEmpty) {

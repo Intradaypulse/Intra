@@ -199,7 +199,7 @@ class _OcrScreenState extends State<OcrScreen> {
             content: const Text(
               'The rewarded ad could not be served right now. '
               'You can retry later or continue this job once without an ad. '
-              'PDFMate will never silently block your document because the '
+              'ScanLumo will never silently block your document because the '
               'ad network is unavailable.',
             ),
             actions: [
@@ -330,7 +330,7 @@ class _OcrScreenState extends State<OcrScreen> {
         content: const Text(
           'Adding an OCR text layer changes the document. Existing digital '
           'signatures may show the file as modified after signing. '
-          'PDFMate will not silently claim that the original signature '
+          'ScanLumo will not silently claim that the original signature '
           'remains valid. Continue with a new searchable copy?',
         ),
         actions: [

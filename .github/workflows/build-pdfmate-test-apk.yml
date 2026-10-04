@@ -1,4 +1,4 @@
-name: Build PDFMate Beta APK
+name: Build ScanLumo Beta APK
 
 on:
   workflow_dispatch:
@@ -98,7 +98,7 @@ jobs:
                   '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n'
                   '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>'
               )
-          s = s.replace('android:label="pdfmate"', 'android:label="PDFMate"')
+          s = s.replace('android:label="pdfmate"', 'android:label="ScanLumo"')
           s = s.replace(
               'android:icon="@mipmap/ic_launcher"',
               'android:icon="@drawable/pdfmate_launcher_icon" '
@@ -199,17 +199,17 @@ jobs:
       - name: Verify APK
         run: |
           test -f buildapp/build/app/outputs/flutter-apk/app-debug.apk
-          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Beta-universal.apk
-          sha256sum PDFMate-Beta-universal.apk | tee PDFMate-Beta-universal.apk.sha256
-          ls -lh PDFMate-Beta-universal.apk
+          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk ScanLumo-Beta-universal.apk
+          sha256sum ScanLumo-Beta-universal.apk | tee ScanLumo-Beta-universal.apk.sha256
+          ls -lh ScanLumo-Beta-universal.apk
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Beta-APK
+          name: ScanLumo-Beta-APK
           path: |
-            PDFMate-Beta-universal.apk
-            PDFMate-Beta-universal.apk.sha256
+            ScanLumo-Beta-universal.apk
+            ScanLumo-Beta-universal.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -227,56 +227,56 @@ jobs:
         shell: bash
         run: |
           test -f buildapp/build/app/outputs/bundle/release/app-release.aab
-          cp buildapp/build/app/outputs/bundle/release/app-release.aab PDFMate-RC-test-signed.aab
+          cp buildapp/build/app/outputs/bundle/release/app-release.aab ScanLumo-RC-test-signed.aab
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER"
           for abi in arm64-v8a armeabi-v7a x86_64; do
             python3 scripts/verify_work_database.py "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk"
-            cp "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk" "PDFMate-RC-$abi.apk"
-            "$APKSIGNER" verify --verbose "PDFMate-RC-$abi.apk"
-            sha256sum "PDFMate-RC-$abi.apk" > "PDFMate-RC-$abi.apk.sha256"
+            cp "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk" "ScanLumo-RC-$abi.apk"
+            "$APKSIGNER" verify --verbose "ScanLumo-RC-$abi.apk"
+            sha256sum "ScanLumo-RC-$abi.apk" > "ScanLumo-RC-$abi.apk.sha256"
           done
-          jarsigner -verify PDFMate-RC-test-signed.aab
-          sha256sum PDFMate-RC-test-signed.aab | tee PDFMate-RC-test-signed.aab.sha256
-          ls -lh PDFMate-RC-*.apk PDFMate-RC-test-signed.aab
+          jarsigner -verify ScanLumo-RC-test-signed.aab
+          sha256sum ScanLumo-RC-test-signed.aab | tee ScanLumo-RC-test-signed.aab.sha256
+          ls -lh ScanLumo-RC-*.apk ScanLumo-RC-test-signed.aab
 
       - name: Upload arm64-v8a APK only
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-APK-arm64-v8a
+          name: ScanLumo-APK-arm64-v8a
           path: |
-            PDFMate-RC-arm64-v8a.apk
-            PDFMate-RC-arm64-v8a.apk.sha256
+            ScanLumo-RC-arm64-v8a.apk
+            ScanLumo-RC-arm64-v8a.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload armeabi-v7a APK only
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-APK-armeabi-v7a
+          name: ScanLumo-APK-armeabi-v7a
           path: |
-            PDFMate-RC-armeabi-v7a.apk
-            PDFMate-RC-armeabi-v7a.apk.sha256
+            ScanLumo-RC-armeabi-v7a.apk
+            ScanLumo-RC-armeabi-v7a.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload x86_64 APK only
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-APK-x86_64
+          name: ScanLumo-APK-x86_64
           path: |
-            PDFMate-RC-x86_64.apk
-            PDFMate-RC-x86_64.apk.sha256
+            ScanLumo-RC-x86_64.apk
+            ScanLumo-RC-x86_64.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload test-signed AAB separately
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Test-Signed-AAB
+          name: ScanLumo-Test-Signed-AAB
           path: |
-            PDFMate-RC-test-signed.aab
-            PDFMate-RC-test-signed.aab.sha256
+            ScanLumo-RC-test-signed.aab
+            ScanLumo-RC-test-signed.aab.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -393,7 +393,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Android-test-diagnostics-API-${{ matrix.api }}
+          name: ScanLumo-Android-test-diagnostics-API-${{ matrix.api }}
           path: device-logs/
           if-no-files-found: ignore
           retention-days: 7
@@ -416,7 +416,7 @@ jobs:
       - name: Download newly built release APK
         uses: actions/download-artifact@v4
         with:
-          name: PDFMate-APK-x86_64
+          name: ScanLumo-APK-x86_64
           path: installed-release
       - name: Launch new release APK twice
         uses: reactivecircus/android-emulator-runner@v2
@@ -427,10 +427,10 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: bash scripts/check_release_launch.sh installed-release/PDFMate-RC-x86_64.apk
+          script: bash scripts/check_release_launch.sh installed-release/ScanLumo-RC-x86_64.apk
       - name: Upload release startup diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Release-startup-diagnostics
+          name: ScanLumo-Release-startup-diagnostics
           path: release-launch-logs/

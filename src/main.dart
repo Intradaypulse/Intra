@@ -114,7 +114,7 @@ class _PDFMateAppState extends State<PDFMateApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'PDFMate',
+      title: 'ScanLumo',
       theme: pdfMateTheme(Brightness.light),
       darkTheme: pdfMateTheme(Brightness.dark),
       themeMode: _themeMode,
@@ -160,7 +160,7 @@ class _LaunchScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              'PDFMate',
+              'ScanLumo',
               style: Theme.of(
                 context,
               ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
@@ -360,7 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialBanner(
         content: Text(
           automatic
-              ? 'PDF is safe inside PDFMate, but the Downloads backup failed. '
+              ? 'PDF is safe inside ScanLumo, but the Downloads backup failed. '
                     'Retry to create the external copy.'
               : 'Could not save the PDF to Downloads: $error',
         ),
@@ -738,7 +738,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_externalAction) return;
     _externalAction = true;
     try {
-      await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with PDFMate'));
+      await SharePlus.instance.share(ShareParams(files: [XFile(record.path)], text: 'Created with ScanLumo'));
     } catch (error) {
       if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error'))); }
     } finally { _externalAction = false; }
@@ -873,7 +873,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(Icons.picture_as_pdf_rounded),
             SizedBox(width: 10),
-            Text('PDFMate Beta'),
+            Text('ScanLumo Beta'),
           ],
         ),
         actions: [

@@ -1,4 +1,4 @@
-# PDFMate production release checklist
+# ScanLumo production release checklist
 
 PDFMate must never store private production credentials in Dart source or committed workflow files. AdMob app/ad-unit identifiers are public SDK configuration, not account credentials.
 Configure these values under **GitHub repository → Settings → Secrets and variables → Actions**.
@@ -26,7 +26,7 @@ The owner supplied these public IDs on 4 October 2026:
 - Rewarded: `ca-app-pub-4375542757188713/3609559552`
 - App-Open: `ca-app-pub-4375542757188713/9984144645`
 
-Production workflow and readiness checks use these as fallbacks; matching repository Secrets or Variables override them. All five required AdMob identifiers have been supplied. Firebase, signing and public operator/privacy configuration remain separate requirements. Supplying identifiers does not verify AdMob readiness or ad serving. Beta APKs retain test ad configuration. This mapping does not rename the app or change its package identity.
+Production workflow and readiness checks use these as fallbacks; matching repository Secrets or Variables override them. All five required AdMob identifiers have been supplied. Firebase, signing and public operator/privacy configuration remain separate requirements. Supplying identifiers does not verify AdMob readiness or ad serving. Beta APKs retain test ad configuration. The app display name is ScanLumo. Its established package identity remains `com.pdfmateapp.pdfmate`, and existing storage folders/keys and signature backup format are retained for compatibility.
 
 
 ## Firebase
@@ -48,11 +48,11 @@ The beta workflow reports configured/missing/invalid field names without printin
 ## Release process
 1. Merge a CI-green PDFMate change to `main`.
 2. Confirm the normal CI release-candidate APK and AAB pass.
-3. Run **Build PDFMate Release AAB** from GitHub Actions.
+3. Run **Build ScanLumo Release AAB** from GitHub Actions.
 4. The workflow validates every required secret and the keystore alias.
 5. It builds the signed Play AAB and per-ABI release APKs.
 6. It verifies the AAB with `jarsigner` and APKs with `apksigner`.
-7. Upload `PDFMate-release.aab` to the intended Play Console testing track before production rollout.
+7. Upload `ScanLumo-release.aab` to the intended Play Console testing track before production rollout.
 
 Do not paste keystore passwords or private key material into source code, issues, pull requests, or chat messages.
 

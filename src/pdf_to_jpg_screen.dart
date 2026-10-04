@@ -194,7 +194,7 @@ class _PdfToJpgScreenState extends State<PdfToJpgScreen> {
     try {
       await SharePlus.instance.share(ShareParams(
         files: [for (final i in _selected.toList()..sort()) XFile(_images[i].path)],
-        text: 'PDF pages exported by PDFMate'));
+        text: 'PDF pages exported by ScanLumo'));
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sharing failed. Please retry: $error')));
     } finally { if (mounted) setState(() => _busy = false); }

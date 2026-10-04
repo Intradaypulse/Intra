@@ -222,7 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 ListTile(
                   leading: Icon(Icons.picture_as_pdf_rounded),
-                  title: Text('PDFMate'),
+                  title: Text('ScanLumo'),
                   subtitle: Text('Advanced beta • on-device PDF toolkit'),
                 ),
                 Divider(height: 1),
