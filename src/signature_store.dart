@@ -91,7 +91,7 @@ class SignatureStore {
     if (backup.length > maxBackupBytes) throw const FormatException('Signature backup is too large.');
     final value = jsonDecode(utf8.decode(backup));
     if (value is! Map || value['format'] != 'pdfmate-signatures' || value['version'] != 1 ||
-        value['signatures'] is! List) throw const FormatException('Not a PDFMate signature backup.');
+        value['signatures'] is! List) { throw const FormatException('Not a PDFMate signature backup.'); }
     final entries = value['signatures'] as List;
     if (entries.isEmpty || entries.length > 100) throw const FormatException('Invalid signature count.');
     final directory = await _directory();
@@ -112,7 +112,7 @@ class SignatureStore {
       final info = img.PngDecoder().startDecode(bytes);
       if (bytes.isEmpty || bytes.length > 8 * 1024 * 1024 || info == null ||
           info.width < 1 || info.height < 1 || info.width * info.height > 4000000 ||
-          img.decodePng(bytes) == null) throw const FormatException('Invalid signature image.');
+          img.decodePng(bytes) == null) { throw const FormatException('Invalid signature image.'); }
       final output = File('${directory.path}/$filename');
       if (await output.exists()) {
         final existing = await output.readAsBytes();

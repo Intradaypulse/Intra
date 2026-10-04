@@ -503,10 +503,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Saved ${pages.length} JPG image(s) to Gallery'))); }
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('JPG export incomplete: $error. Captured images are retained.'),
         action: SnackBarAction(label: 'Retry', onPressed: () => _saveCaptured(pages, format)),
-      ));
+      )); }
     } finally { if (mounted) setState(() => _busy = false); }
     if (saved && format == 'both') { await _saveScan(pages); }
   }

@@ -8,7 +8,7 @@ PdfPasswordFailure? pdfPasswordFailure(Object error) {
   final message = error.toString().toLowerCase();
   if (message.contains('password required')) return PdfPasswordFailure.required;
   if (message.contains('wrong password') || message.contains('incorrect password') ||
-      message.contains('invalid password')) return PdfPasswordFailure.wrong;
+      message.contains('invalid password')) { return PdfPasswordFailure.wrong; }
   return null;
 }
 

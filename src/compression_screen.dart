@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
 import 'output_protection.dart';
