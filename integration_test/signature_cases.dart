@@ -66,9 +66,17 @@ void registerSignatureCases() {
           .map((p) => (p.x, p.y)).toList();
         expect(dark.length, greaterThan(300), reason: 'Visible black ink at angle $angle');
         // Check the actual persisted PDF, not just the Flutter preview.
-        final top = (600 - 60 - height) * 2;
-        expect(dark.every((p) => p.$1 >= 78 && p.$1 <= 322 &&
-          p.$2 >= top - 2 && p.$2 <= 1082), isTrue);
+        // renderPage constrains BOTH axes to 800; a portrait page's width
+        // is smaller than 800. Derive pixel scales from the returned bitmap.
+        final scaleX = after.width / 400;
+        final scaleY = after.height / 600;
+        final top = (600 - 60 - height) * scaleY;
+        final xs = dark.map((p) => p.$1).toList()..sort();
+        final ys = dark.map((p) => p.$2).toList()..sort();
+        debugPrint('SIGNATURE_QA angle=$angle raster=${after.width}x${after.height} '
+          'ink=${dark.length} bounds=${xs.first},${ys.first},${xs.last},${ys.last}');
+        expect(dark.every((p) => p.$1 >= 40 * scaleX - 2 && p.$1 <= 160 * scaleX + 2 &&
+          p.$2 >= top - 2 && p.$2 <= 540 * scaleY + 2), isTrue);
         var changed = 0;
         var white = 0;
         for (final pixel in after) {
@@ -77,7 +85,7 @@ void registerSignatureCases() {
           if (pixel.r > 240 && pixel.g > 240 && pixel.b > 240) white++;
         }
         expect(changed, greaterThan(300));
-        expect(changed, lessThan(width * height * 4 * .35));
+        expect(changed, lessThan(width * height * scaleX * scaleY * .35));
         expect(white, 0, reason: 'Transparent signature must not cover the document with white');
       }
       expect(tester.takeException(), isNull);
