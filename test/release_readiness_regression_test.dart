@@ -103,6 +103,9 @@ void main() {
       final empty = SignatureStore(directoryProvider: () async => Directory('${target.path}/fresh'));
       await expectLater(empty.restoreBackup(Uint8List.fromList(utf8.encode(jsonEncode(invalid)))), throwsFormatException);
       expect(await empty.load(), isEmpty);
+      entries.last['file'] = '${List.filled(256, '1').join()}.T3duZXI.png';
+      await expectLater(empty.restoreBackup(Uint8List.fromList(utf8.encode(jsonEncode(invalid)))), throwsFormatException);
+      expect(await empty.load(), isEmpty);
     } finally { await root.delete(recursive: true); await target.delete(recursive: true); }
   });
   test('malformed and oversized signature backups fail before publication', () async {

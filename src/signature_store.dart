@@ -103,7 +103,7 @@ class SignatureStore {
         throw const FormatException('Invalid signature entry.');
       }
       final filename = entry['file'] as String, name = entry['name'] as String;
-      if (!RegExp(r'^[0-9]+\.[A-Za-z0-9_-]+\.png$').hasMatch(filename) || !names.add(filename) ||
+      if (!RegExp(r'^[0-9]{1,20}\.[A-Za-z0-9_-]+\.png$').hasMatch(filename) || !names.add(filename) ||
           name.isEmpty || name.length > 60 || utf8.encode(name).length > 120 ||
           utf8.decode(base64Url.decode(base64Url.normalize(filename.split('.')[1]))) != name) {
         throw const FormatException('Invalid signature name.');
