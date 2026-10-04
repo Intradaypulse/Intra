@@ -106,6 +106,14 @@ void main() {
       entries.last['file'] = '${List.filled(256, '1').join()}.T3duZXI.png';
       await expectLater(empty.restoreBackup(Uint8List.fromList(utf8.encode(jsonEncode(invalid)))), throwsFormatException);
       expect(await empty.load(), isEmpty);
+      final oversizedPng = Uint8List.fromList(bytes);
+      ByteData.sublistView(oversizedPng).setUint32(16, 0xffffffff);
+      ByteData.sublistView(oversizedPng).setUint32(20, 0xffffffff);
+      entries.last['file'] = '123.T3duZXI.png';
+      entries.last['png'] = base64Encode(oversizedPng);
+      await expectLater(empty.restoreBackup(Uint8List.fromList(utf8.encode(jsonEncode(invalid)))), throwsFormatException);
+      expect(await empty.load(), isEmpty);
+
     } finally { await root.delete(recursive: true); await target.delete(recursive: true); }
   });
   test('malformed and oversized signature backups fail before publication', () async {

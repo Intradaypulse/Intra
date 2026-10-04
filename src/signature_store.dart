@@ -66,6 +66,17 @@ class SignatureStore {
     if (await signature.file.exists()) await signature.file.delete();
   });
 
+  bool _validBackupPng(Uint8List bytes) {
+    if (bytes.length < 33 || bytes.length > 8 * 1024 * 1024 ||
+        !listEquals(bytes.sublist(0, 8), const [137, 80, 78, 71, 13, 10, 26, 10]) ||
+        String.fromCharCodes(bytes.sublist(12, 16)) != 'IHDR') { return false; }
+    final header = ByteData.sublistView(bytes);
+    final width = header.getUint32(16), height = header.getUint32(20);
+    if (header.getUint32(8) != 13 || width < 1 || height < 1 || width > 4096 || height > 4096 ||
+        width * height > 4000000) { return false; }
+    try { return img.decodePng(bytes) != null; } catch (_) { return false; }
+  }
+
   /// Portable image backup. Import preserves IDs, so retries do not duplicate.
   Future<Uint8List> exportBackup() async {
     final signatures = await load();
@@ -109,10 +120,7 @@ class SignatureStore {
         throw const FormatException('Invalid signature name.');
       }
       final bytes = base64Decode(entry['png'] as String);
-      final info = img.PngDecoder().startDecode(bytes);
-      if (bytes.isEmpty || bytes.length > 8 * 1024 * 1024 || info == null ||
-          info.width < 1 || info.height < 1 || info.width * info.height > 4000000 ||
-          img.decodePng(bytes) == null) { throw const FormatException('Invalid signature image.'); }
+      if (!_validBackupPng(bytes)) throw const FormatException('Invalid signature image.');
       final output = File('${directory.path}/$filename');
       if (await output.exists()) {
         final existing = await output.readAsBytes();
