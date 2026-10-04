@@ -6,6 +6,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
 import 'output_protection.dart';
+import 'pdf_password_dialog.dart';
 
 class CompressionScreen extends StatefulWidget {
   const CompressionScreen({super.key, required this.service});
@@ -42,38 +43,8 @@ class _CompressionScreenState extends State<CompressionScreen> {
     return '$bytes B';
   }
 
-  Future<String?> _askPassword({bool wrong = false}) async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(wrong ? 'Wrong password' : 'Protected PDF'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'PDF password',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) => Navigator.pop(context, value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Open'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return value;
-  }
+  Future<String?> _askPassword({bool wrong = false}) => askPdfPassword(context,
+    title: wrong ? 'Wrong password' : 'Protected PDF', label: 'PDF password');
 
   Future<void> _pick() async {
     if (_busy) return;
@@ -87,14 +58,11 @@ class _CompressionScreenState extends State<CompressionScreen> {
         try {
           await widget.service.pageCount(file, password: password);
           break;
-        } on PdfPasswordRequired {
+        } catch (error) {
+          final failure = pdfPasswordFailure(error);
+          if (failure == null) rethrow;
           if (!mounted) return;
-          final entered = await _askPassword();
-          if (entered == null) return;
-          password = entered;
-        } on PdfWrongPassword {
-          if (!mounted) return;
-          final entered = await _askPassword(wrong: true);
+          final entered = await _askPassword(wrong: failure == PdfPasswordFailure.wrong);
           if (entered == null) return;
           password = entered;
         }

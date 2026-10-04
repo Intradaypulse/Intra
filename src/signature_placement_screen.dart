@@ -9,6 +9,7 @@ import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
 import 'output_protection.dart';
+import 'pdf_password_dialog.dart';
 import 'lru_future_cache.dart';
 import 'signature_screen.dart';
 import 'signature_geometry.dart';
@@ -31,7 +32,8 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   Uint8List? _placedSignature;
   double _signatureAspect = 2.25;
   Uint8List? _cachedSignature;
-  double? _cachedRotation;
+  double _imageWidth = 900, _imageHeight = 400;
+  double _rotatedWidth = 900, _rotatedHeight = 400;
   String? _previewError;
   final _thumbs = LruFutureCache<int, Uint8List?>(capacity: 24);
   List<PdfPageInfo> _pageInfos = [];
@@ -62,37 +64,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     if (_signature != null) _updateSignatureImage();
   }
 
-  Future<String?> _askPassword() async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('PDF password'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Open'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return value;
-  }
+  Future<String?> _askPassword() => askPdfPassword(context);
 
   Future<void> _pickPdf() async {
     if (_busy) return;
@@ -118,13 +90,15 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
           try {
             infos = await widget.service.pageInfos(file);
             break;
-          } on PdfPasswordRequired {
+          } catch (error) {
+            if (pdfPasswordFailure(error) == null) rethrow;
             if (!mounted) return;
             final password = await _askPassword();
             if (password == null) return;
             try {
               file = await widget.service.decryptToTemporary(file, password);
-            } on PdfWrongPassword {
+            } catch (error) {
+              if (pdfPasswordFailure(error) == null) rethrow;
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Wrong password.')),
@@ -193,15 +167,18 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   }
 
   void _updateSignatureImage() {
-    if (identical(_cachedSignature, _signature) && _cachedRotation == _rotationDegrees) return;
-    final decoded = _signature == null ? null : img.decodePng(_signature!);
-    if (decoded == null) return;
-    final rotated = img.copyRotate(decoded, angle: _rotationDegrees,
-        interpolation: img.Interpolation.linear);
-    _placedSignature = Uint8List.fromList(img.encodePng(rotated));
-    _signatureAspect = rotated.width / rotated.height;
-    _cachedSignature = _signature;
-    _cachedRotation = _rotationDegrees;
+    if (!identical(_cachedSignature, _signature)) {
+      final decoded = _signature == null ? null : img.decodePng(_signature!);
+      if (decoded == null) return;
+      _imageWidth = decoded.width.toDouble();
+      _imageHeight = decoded.height.toDouble();
+      _placedSignature = _signature;
+      _cachedSignature = _signature;
+    }
+    final angle = _rotationDegrees * math.pi / 180;
+    _rotatedWidth = _imageWidth * math.cos(angle).abs() + _imageHeight * math.sin(angle).abs();
+    _rotatedHeight = _imageHeight * math.cos(angle).abs() + _imageWidth * math.sin(angle).abs();
+    _signatureAspect = _rotatedWidth / _rotatedHeight;
   }
 
   Rect _placement(double pageWidth, double pageHeight) => signaturePlacement(
@@ -260,7 +237,11 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
       if (_wasProtected) {
         if (!await confirmUnprotectedOutput(context) || !mounted) return;
       }
-      var finalSignature = _placedSignature ?? signature;
+      // Encode only when saving. The live preview uses a paint transform.
+      final decodedSignature = img.decodePng(signature);
+      if (decodedSignature == null) throw StateError('Invalid signature image.');
+      var finalSignature = Uint8List.fromList(img.encodePng(img.copyRotate(
+        decodedSignature, angle: _rotationDegrees, interpolation: img.Interpolation.linear)));
       final pageInfo = _pageInfos[_page];
       final placement = _placement(_viewWidth, _viewHeight);
       final rect = signaturePdfRect(placement, _pageWidth, _pageHeight, pageInfo.rotation);
@@ -493,10 +474,12 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                                                 width: 2,
                                               ),
                                             ),
-                                            child: Image.memory(
-                                              signature,
-                                              fit: BoxFit.contain,
-                                            ),
+                                            child: FittedBox(fit: BoxFit.contain,
+                                              child: SizedBox(width: _rotatedWidth, height: _rotatedHeight,
+                                                child: OverflowBox(minWidth: _imageWidth, maxWidth: _imageWidth,
+                                                  minHeight: _imageHeight, maxHeight: _imageHeight,
+                                                  child: Transform.rotate(angle: _rotationDegrees * math.pi / 180,
+                                                    child: Image.memory(signature, fit: BoxFit.fill))))),
                                         ),
                                       ),
                                     ),

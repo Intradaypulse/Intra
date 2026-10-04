@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'pdf_service.dart';
 import 'output_protection.dart';
+import 'pdf_password_dialog.dart';
 
 enum SplitMode { everyPage, everyN, custom, selected }
 
@@ -37,38 +37,6 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
     super.dispose();
   }
 
-  Future<String?> _askPassword() async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('PDF password'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            labelText: 'Password',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Open'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return value;
-  }
-
   Future<void> _pick() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -98,17 +66,12 @@ class _AdvancedSplitScreenState extends State<AdvancedSplitScreen> {
             await widget.service.secureDeleteTemporary(previous);
           }
           break;
-        } on PdfPasswordRequired {
+        } catch (error) {
+          final failure = pdfPasswordFailure(error);
+          if (failure == null) rethrow;
           if (!mounted) return;
-          final entered = await _askPassword();
-          if (entered == null) return;
-          password = entered;
-        } on PdfWrongPassword {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Wrong password.')),
-          );
-          final entered = await _askPassword();
+          final entered = await askPdfPassword(context,
+            title: failure == PdfPasswordFailure.wrong ? 'Wrong password. Try again' : 'PDF password');
           if (entered == null) return;
           password = entered;
         }

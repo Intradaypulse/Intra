@@ -25,6 +25,15 @@ The production workflow rejects Google's sample/test publisher IDs and malformed
 - `FIREBASE_MESSAGING_SENDER_ID`
 - `FIREBASE_STORAGE_BUCKET`
 
+## Public repository variables
+Set these under **Settings → Secrets and variables → Actions → Variables**:
+- `ANDROID_UPLOAD_CERT_SHA256` — SHA-256 of the DER certificate for the existing Play upload key. The release rejects a different key instead of silently changing the signing identity. Play App Signing may use a separate app signing certificate; use Play testing tracks to verify updates of Play-installed apps.
+- `PDFMATE_OPERATOR_NAME` — responsible operator/company.
+- `PDFMATE_PRIVACY_EMAIL` — working privacy contact.
+- `PDFMATE_PRIVACY_URL` — public HTTPS policy address.
+
+The beta workflow reports configured/missing/invalid field names without printing values. This is configuration preflight, not evidence that ads serve or Firebase receives events. Production validation requires all fields and embeds the supplied public details in the in-app notice. Publish the matching public policy and account-provided app-ads.txt on the real developer domain; placeholder details must not be used.
+
 ## Release process
 1. Merge a CI-green PDFMate change to `main`.
 2. Confirm the normal CI release-candidate APK and AAB pass.
@@ -41,3 +50,6 @@ Before production launch, publish the exact `app-ads.txt` line supplied by the A
 
 ## Runtime behavior
 Debug/beta builds use Google's test ad units when production IDs are absent. Signed production builds fail fast if any required AdMob, Firebase, or signing secret is missing, so a release cannot silently ship with test monetization or disabled telemetry.
+
+## Device and upgrade validation
+Keep the established signing keys. Export signature backups and shared PDF copies before testing an installation change. Verify an upgrade from the previously distributed release using the intended distribution channel; fresh installs and reinstalling the same APK do not prove cross-version data preservation. Physical OEM QA and a real mixed-language document corpus remain separate release gates in DEVICE_QA.md.

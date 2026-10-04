@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'unicode_overlay_cases.dart';
 import 'deep_audit_cases.dart';
+import 'performance_cases.dart';
 
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -20,6 +21,7 @@ void main() {
 
   registerUnicodeOverlayCases();
   registerDeepAuditCases();
+  registerPerformanceCases();
 
   testWidgets('camera still JPEG is preserved and converts to a one-page PDF', (tester) async {
     final cameras = await availableCameras();

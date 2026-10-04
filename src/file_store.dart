@@ -51,6 +51,7 @@ class PdfFileStore {
 
   static const _key = 'pdfmate_recent_files_v1';
   static const _hiddenKey = 'pdfmate_hidden_files_v1';
+  static const _removedKey = 'pdfmate_removed_records_v1';
   static const _renameKey = 'pdfmate_pending_rename_v1';
 
   Future<List<PdfRecord>> load() => _mutations.run(_load);
@@ -198,12 +199,51 @@ class PdfFileStore {
 
   Future<void> _restoreHidden(Iterable<String> paths) async {
     final prefs = await SharedPreferences.getInstance();
+    final restored = paths.toSet();
     final hidden = (prefs.getStringList(_hiddenKey) ?? const <String>[]).toSet();
     final before = hidden.length;
-    hidden.removeAll(paths);
+    hidden.removeAll(restored);
     if (hidden.length != before) {
       await _persist(prefs, () => prefs.setStringList(_hiddenKey, hidden.toList()));
     }
+    final removed = _removedRecords(prefs);
+    final removedCount = removed.length;
+    removed.removeWhere((record) => restored.contains(record.path));
+    if (removed.length != removedCount) await _saveRemoved(prefs, removed);
+  }
+
+  List<PdfRecord> _removedRecords(SharedPreferences prefs) {
+    final records = <PdfRecord>[];
+    for (final raw in prefs.getStringList(_removedKey) ?? const <String>[]) {
+      try { records.add(PdfRecord.fromJson(jsonDecode(raw) as Map<String, dynamic>)); } catch (_) {}
+    }
+    return records;
+  }
+
+  Future<void> _saveRemoved(SharedPreferences prefs, List<PdfRecord> records) =>
+    _persist(prefs, () => prefs.setStringList(_removedKey,
+      records.map((record) => jsonEncode(record.toJson())).toList()));
+
+  Future<List<PdfRecord>> loadRemoved() => _mutations.run(() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hidden = (prefs.getStringList(_hiddenKey) ?? const <String>[]).toSet();
+    final records = {for (final record in _removedRecords(prefs)) record.path: record};
+    final result = <PdfRecord>[];
+    for (final path in hidden) {
+      final file = File(path);
+      if (!await file.exists()) continue;
+      result.add(records[path] ?? PdfRecord(path: path,
+        name: file.uri.pathSegments.last, createdAt: (await file.stat()).modified));
+    }
+    result.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return result;
+  });
+
+  Future<void> restoreRemoved(PdfRecord record) async {
+    if (!await File(record.path).exists()) {
+      throw FileSystemException('The stored PDF no longer exists', record.path);
+    }
+    await add(record);
   }
 
   /// Startup recovery adds missing outputs without changing existing metadata.
@@ -221,6 +261,10 @@ class PdfFileStore {
 
   Future<void> removeFromLibrary(String path) => _mutations.run(() async {
     final prefs = await SharedPreferences.getInstance();
+    final current = await _load();
+    final removed = _removedRecords(prefs)..removeWhere((record) => record.path == path);
+    removed.addAll(current.where((record) => record.path == path));
+    await _saveRemoved(prefs, removed);
     final hidden = (prefs.getStringList(_hiddenKey) ?? const <String>[]).toSet()..add(path);
     // Persist suppression first: a restart between writes must not re-import it.
     await _persist(prefs, () => prefs.setStringList(_hiddenKey, hidden.toList()));

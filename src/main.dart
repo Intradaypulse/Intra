@@ -21,10 +21,12 @@ import 'telemetry_service.dart';
 import 'signature_placement_screen.dart';
 import 'ads_service.dart';
 import 'file_store.dart';
+import 'removed_pdfs_screen.dart';
 import 'live_scanner_screen.dart';
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
 import 'pdf_password_dialog.dart';
+import 'pdf_name_dialog.dart';
 import 'pdf_viewer.dart';
 import 'scan_draft_store.dart';
 
@@ -496,17 +498,17 @@ class _HomeScreenState extends State<HomeScreen> {
     var saved = false;
     try {
       await _scanDrafts.exportJpgs(pages, _service.saveJpgToGallery);
-      if (format == 'jpg') await _scanDrafts.discard(pages);
+      if (format == 'jpg') { await _scanDrafts.discard(pages); }
       saved = true;
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved ${pages.length} JPG image(s) to Gallery')));
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved ${pages.length} JPG image(s) to Gallery'))); }
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('JPG export incomplete: $error. Captured images are retained.'),
         action: SnackBarAction(label: 'Retry', onPressed: () => _saveCaptured(pages, format)),
       ));
     } finally { if (mounted) setState(() => _busy = false); }
-    if (saved && format == 'both') await _saveScan(pages);
+    if (saved && format == 'both') { await _saveScan(pages); }
   }
 
   Future<void> _saveScan(List<String> pages) async {
@@ -765,35 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
       RegExp(r'\.pdf$', caseSensitive: false),
       '',
     );
-    final controller = TextEditingController(text: current);
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename PDF'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            suffixText: '.pdf',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final name = controller.text.trim();
-              if (name.isNotEmpty) Navigator.pop(context, name);
-            },
-            child: const Text('Rename'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final value = await askPdfName(context, initialName: current);
     if (value == null) return;
 
     try {
@@ -845,6 +819,19 @@ class _HomeScreenState extends State<HomeScreen> {
       await _store.removeFromLibrary(record.path);
     }
     await _loadFiles();
+    if (confirmed == 'library' && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Removed from My PDFs. Storage file kept.'),
+        action: SnackBarAction(label: 'Undo', onPressed: () async {
+          try {
+            await _store.restoreRemoved(record);
+            await _loadFiles();
+          } catch (_) {
+            if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not restore PDF. Try Removed PDFs.'))); }
+          }
+        })));
+    }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete PDF: $e')));
     } finally { _recordOperations.remove(record.path); }
@@ -890,6 +877,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(tooltip: 'Removed PDFs', icon: const Icon(Icons.restore_page_outlined),
+            onPressed: _busy ? null : () async {
+              await Navigator.of(context).push<void>(MaterialPageRoute(
+                builder: (_) => RemovedPdfsScreen(store: _store)));
+              await _loadFiles();
+            }),
           if (AdsService.instance.privacyOptionsRequired)
             IconButton(
               tooltip: 'Privacy choices',

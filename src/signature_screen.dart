@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:signature/signature.dart';
 import 'signature_store.dart';
+import 'signature_backup_screen.dart';
 
 class SignatureScreen extends StatefulWidget {
   const SignatureScreen({super.key, this.store});
@@ -117,6 +118,9 @@ class _SignatureScreenState extends State<SignatureScreen> {
       appBar: AppBar(
         title: const Text('Draw signature'),
         actions: [
+          IconButton(tooltip: 'Signature backup', icon: const Icon(Icons.backup_outlined),
+            onPressed: _exporting ? null : () => Navigator.of(context).push<void>(MaterialPageRoute(
+              builder: (_) => SignatureBackupScreen(store: _store)))),
           IconButton(tooltip: 'Saved signatures', onPressed: _exporting ? null : _saved,
             icon: const Icon(Icons.history_edu)),
           IconButton(

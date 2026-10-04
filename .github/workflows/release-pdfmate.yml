@@ -33,6 +33,10 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
         run: |
           require() {
             local name="$1"
@@ -43,6 +47,10 @@ jobs:
             fi
           }
 
+          require ANDROID_UPLOAD_CERT_SHA256 "$ANDROID_UPLOAD_CERT_SHA256"
+          require PDFMATE_OPERATOR_NAME "$PDFMATE_OPERATOR_NAME"
+          require PDFMATE_PRIVACY_EMAIL "$PDFMATE_PRIVACY_EMAIL"
+          require PDFMATE_PRIVACY_URL "$PDFMATE_PRIVACY_URL"
           require ANDROID_KEYSTORE_BASE64 "$KEYSTORE_B64"
           require ANDROID_KEYSTORE_PASSWORD "$KEYSTORE_PASSWORD"
           require ANDROID_KEY_ALIAS "$KEY_ALIAS"
@@ -84,6 +92,28 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
 
+      - name: Validate production values
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
+        run: python3 scripts/check_production_config.py
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
@@ -116,6 +146,10 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > buildapp/android/app/pdfmate-upload.jks
           python3 - <<'PY'
@@ -283,8 +317,19 @@ jobs:
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
         run: |
           keytool -list             -keystore buildapp/android/app/pdfmate-upload.jks             -storepass "$ANDROID_KEYSTORE_PASSWORD"             -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          keytool -exportcert -keystore buildapp/android/app/pdfmate-upload.jks -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" -file /tmp/pdfmate-upload-cert.der
+          python3 - <<'PYVERIFY'
+          import hashlib, os
+          from pathlib import Path
+          expected = os.environ['ANDROID_UPLOAD_CERT_SHA256'].replace(':', '').lower()
+          actual = hashlib.sha256(Path('/tmp/pdfmate-upload-cert.der').read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit('Upload certificate does not match the pinned signing identity. Refusing release.')
+          print('Pinned upload certificate verified.')
+          PYVERIFY
           echo "Upload keystore alias verified."
 
       - name: Resolve and analyze
@@ -318,6 +363,10 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
         shell: bash
         run: |
           args=(
@@ -331,6 +380,9 @@ jobs:
             --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID"
             --dart-define=FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET"
+            --dart-define=PDFMATE_OPERATOR_NAME="$PDFMATE_OPERATOR_NAME"
+            --dart-define=PDFMATE_PRIVACY_EMAIL="$PDFMATE_PRIVACY_EMAIL"
+            --dart-define=PDFMATE_PRIVACY_URL="$PDFMATE_PRIVACY_URL"
           )
           flutter build appbundle "${args[@]}"
           flutter build apk --release --split-per-abi "${args[@]}"
