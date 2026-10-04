@@ -1,11 +1,13 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:signature/signature.dart';
 import 'signature_store.dart';
 
 class SignatureScreen extends StatefulWidget {
-  const SignatureScreen({super.key});
+  const SignatureScreen({super.key, this.store});
+  final SignatureStore? store;
 
   @override
   State<SignatureScreen> createState() => _SignatureScreenState();
@@ -14,13 +16,16 @@ class SignatureScreen extends StatefulWidget {
 class _SignatureScreenState extends State<SignatureScreen> {
   late final SignatureController _controller;
   bool _exporting = false;
-  bool _saveForReuse = false;
+  bool _saveForReuse = true;
   final _name = TextEditingController(text: 'My signature');
-  final _store = SignatureStore();
+  late final SignatureStore _store;
+  Uint8List? _lastSaved;
+  String? _lastSavedName;
 
   @override
   void initState() {
     super.initState();
+    _store = widget.store ?? SignatureStore();
     _controller = SignatureController(
       penStrokeWidth: 3,
       penColor: Colors.black,
@@ -35,16 +40,24 @@ class _SignatureScreenState extends State<SignatureScreen> {
     super.dispose();
   }
 
-  Future<void> _done() async {
+  Future<void> _done({bool close = true}) async {
     if (_exporting || _controller.isEmpty) return;
     setState(() => _exporting = true);
     try {
       final Uint8List? bytes = await _controller.toPngBytes(width: 900, height: 400);
       if (!mounted) return;
       if (bytes == null) throw StateError('Could not export signature.');
-      if (_saveForReuse) await _store.save(_name.text, bytes);
+      if (_saveForReuse && (!listEquals(_lastSaved, bytes) || _lastSavedName != _name.text.trim())) {
+        await _store.save(_name.text, bytes);
+        _lastSaved = bytes;
+        _lastSavedName = _name.text.trim();
+      }
       if (!mounted) return;
-      Navigator.of(context).pop(bytes);
+      if (close) {
+        Navigator.of(context).pop(bytes);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signature saved for reuse.')));
+      }
     } catch (e) {
       if (mounted) { ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Signature export failed: $e')));
@@ -65,7 +78,7 @@ class _SignatureScreenState extends State<SignatureScreen> {
         builder: (context) => StatefulBuilder(builder: (context, refresh) => AlertDialog(
           title: const Text('Saved signatures'),
           content: SizedBox(width: 360, height: 300, child: signatures.isEmpty
-            ? const Center(child: Text('Draw a signature and enable Save for reuse.'))
+            ? const Center(child: Text('Draw a signature, then tap Save signature.'))
             : ListView.builder(itemCount: signatures.length, itemBuilder: (context, index) {
               final signature = signatures[index];
               return ListTile(title: Text(signature.name),
@@ -133,10 +146,10 @@ class _SignatureScreenState extends State<SignatureScreen> {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
-                    child: Signature(
+                    child: IgnorePointer(ignoring: _exporting, child: Signature(
                       controller: _controller,
                       backgroundColor: Colors.white,
-                    ),
+                    )),
                   ),
                 ),
               ),
@@ -146,6 +159,9 @@ class _SignatureScreenState extends State<SignatureScreen> {
             if (_saveForReuse) Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
               child: TextField(controller: _name, enabled: !_exporting, maxLength: 60,
                 decoration: const InputDecoration(labelText: 'Signature name'))),
+            if (_saveForReuse) OutlinedButton.icon(
+              onPressed: _exporting ? null : () => _done(close: false),
+              icon: const Icon(Icons.save_outlined), label: const Text('Save signature')),
             Padding(
               padding: const EdgeInsets.all(16),
               child: SizedBox(

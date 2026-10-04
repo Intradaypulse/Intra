@@ -506,7 +506,7 @@ class _OcrScreenState extends State<OcrScreen> {
                     service: widget.service, source: _source!, pageCount: _pageCount,
                     password: _password, script: _language.script)));
                 },
-                icon: const Icon(Icons.document_scanner_outlined), label: const Text('Preview & copy text'),
+                icon: const Icon(Icons.document_scanner_outlined), label: const Text('Select text directly on image'),
               ),
               const SizedBox(height: 18),
               Row(

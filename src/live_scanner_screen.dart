@@ -12,7 +12,8 @@ import 'scan_capture_gate.dart';
 import 'crop_geometry.dart';
 
 class LiveScannerScreen extends StatefulWidget {
-  const LiveScannerScreen({super.key});
+  const LiveScannerScreen({super.key, this.photoMode = false});
+  final bool photoMode;
 
   @override
   State<LiveScannerScreen> createState() => _LiveScannerScreenState();
@@ -64,6 +65,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   @override
   void initState() {
     super.initState();
+    _autoCapture = !widget.photoMode;
     WidgetsBinding.instance.addObserver(this);
     _start();
   }
@@ -88,7 +90,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
 
       final controller = CameraController(
         back,
-        ResolutionPreset.veryHigh,
+        widget.photoMode ? ResolutionPreset.max : ResolutionPreset.veryHigh,
         enableAudio: false,
         imageFormatGroup: Platform.isIOS
             ? ImageFormatGroup.bgra8888
@@ -284,6 +286,14 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       capturedPhotoPath = capturedPath;
       _tempSession.own(capturedPath);
 
+      if (widget.photoMode) {
+        // Persist the actual still-camera file, never an analyzer/preview frame.
+        final file = await _drafts.append(await File(capturedPath).readAsBytes());
+        _tempSession.own(file.path);
+        if (mounted) setState(() { _pages.add(file); _hint = 'Photo ${_pages.length} added'; });
+        return;
+      }
+
       final detected = await _detector.detect(
         ScanInput.file(capturedPath),
         sensitivity: DetectionSensitivity.strict,
@@ -359,12 +369,12 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     if (_capturing || _confirmingExit) return;
     _confirmingExit = true;
     final choice = await showDialog<String>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Keep your scanned pages?'),
-      content: const Text('Save these pages as a PDF, continue scanning, or discard them.'),
+      title: const Text('Keep your captured images?'),
+      content: const Text('Continue to choose JPG or PDF, keep scanning, or discard these images.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, 'continue'), child: const Text('Continue scanning')),
         TextButton(onPressed: () => Navigator.pop(context, 'discard'), child: const Text('Discard')),
-        FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Save PDF')),
+        FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Continue to save')),
       ],
     ));
     _confirmingExit = false;
@@ -458,7 +468,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         title: Text(
-          _pages.isEmpty ? 'Scan document' : '${_pages.length} page(s)',
+          _pages.isEmpty ? (widget.photoMode ? 'Capture original photo' : 'Scan document') : '${_pages.length} page(s)',
         ),
         actions: [
           IconButton(

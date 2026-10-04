@@ -21,6 +21,35 @@ void main() {
   registerUnicodeOverlayCases();
   registerDeepAuditCases();
 
+  testWidgets('camera still JPEG is preserved and converts to a one-page PDF', (tester) async {
+    final cameras = await availableCameras();
+    expect(cameras, isNotEmpty);
+    final controller = CameraController(cameras.first, ResolutionPreset.max, enableAudio: false);
+    File? photo;
+    File? output;
+    try {
+      await controller.initialize();
+      final captured = await controller.takePicture();
+      photo = File(captured.path);
+      final original = await photo.readAsBytes();
+      final decoded = img.decodeJpg(original);
+      expect(decoded, isNotNull);
+      expect(decoded!.width, greaterThan(100));
+      expect(decoded.height, greaterThan(100));
+      final service = PdfService();
+      final uri = await service.saveJpgToGallery(photo);
+      expect(uri, isNotEmpty);
+      expect(await photo.readAsBytes(), original);
+      output = await service.createScannedPdfFromFiles([photo.path]);
+      expect(await service.pageCount(output), 1);
+      expect(await photo.readAsBytes(), original);
+    } finally {
+      await controller.dispose();
+      if (photo != null && await photo.exists()) await photo.delete();
+      if (output != null && await output.exists()) await output.delete();
+    }
+  });
+
   testWidgets(
     'app boots, settings and camera lifecycle work',
     (tester) async {

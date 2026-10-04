@@ -50,6 +50,7 @@ class PdfFileStore {
   static final _mutations = SerialExecutor();
 
   static const _key = 'pdfmate_recent_files_v1';
+  static const _hiddenKey = 'pdfmate_hidden_files_v1';
   static const _renameKey = 'pdfmate_pending_rename_v1';
 
   Future<List<PdfRecord>> load() => _mutations.run(_load);
@@ -58,13 +59,14 @@ class PdfFileStore {
     final prefs = await SharedPreferences.getInstance();
     await _recoverRename(prefs);
     final raw = prefs.getStringList(_key) ?? const <String>[];
+    final hidden = (prefs.getStringList(_hiddenKey) ?? const <String>[]).toSet();
     final records = <PdfRecord>[];
     for (final item in raw) {
       try {
         final record = PdfRecord.fromJson(
           jsonDecode(item) as Map<String, dynamic>,
         );
-        if (await File(record.path).exists()) records.add(record);
+        if (!hidden.contains(record.path) && await File(record.path).exists()) records.add(record);
       } catch (_) {}
     }
     records.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -163,6 +165,7 @@ class PdfFileStore {
   }
 
   Future<void> add(PdfRecord record) => _mutations.run(() async {
+    await _restoreHidden([record.path]);
     final items = await _load();
     PdfRecord? existing;
     for (final item in items) {
@@ -181,6 +184,7 @@ class PdfFileStore {
 
   Future<void> addMany(List<PdfRecord> records) => _mutations.run(() async {
     if (records.isEmpty) return;
+    await _restoreHidden(records.map((record) => record.path));
     final items = await _load();
     final paths = records.map((e) => e.path).toSet();
     final favorites = {for (final item in items) item.path: item.favorite};
@@ -192,14 +196,36 @@ class PdfFileStore {
     await _save(items);
   });
 
+  Future<void> _restoreHidden(Iterable<String> paths) async {
+    final prefs = await SharedPreferences.getInstance();
+    final hidden = (prefs.getStringList(_hiddenKey) ?? const <String>[]).toSet();
+    final before = hidden.length;
+    hidden.removeAll(paths);
+    if (hidden.length != before) {
+      await _persist(prefs, () => prefs.setStringList(_hiddenKey, hidden.toList()));
+    }
+  }
+
   /// Startup recovery adds missing outputs without changing existing metadata.
   Future<void> recoverMissing(List<PdfRecord> records) => _mutations.run(() async {
     final items = await _load();
+    final prefs = await SharedPreferences.getInstance();
+    final hidden = (prefs.getStringList(_hiddenKey) ?? const <String>[]).toSet();
     final known = items.map((item) => item.path).toSet();
     final missing = [for (final record in records)
-      if (known.add(record.path)) record];
+      if (!hidden.contains(record.path) && known.add(record.path)) record];
     if (missing.isEmpty) return;
     items.addAll(missing);
+    await _save(items);
+  });
+
+  Future<void> removeFromLibrary(String path) => _mutations.run(() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hidden = (prefs.getStringList(_hiddenKey) ?? const <String>[]).toSet()..add(path);
+    // Persist suppression first: a restart between writes must not re-import it.
+    await _persist(prefs, () => prefs.setStringList(_hiddenKey, hidden.toList()));
+    final items = await _load();
+    items.removeWhere((item) => item.path == path);
     await _save(items);
   });
 

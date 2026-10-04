@@ -28,6 +28,11 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: OcrPagePreviewScreen(
       service: PreviewService(), source: File('/tmp/page.pdf'), pageCount: 1)));
     await tester.pumpAndSettle();
+    expect(find.text('Hello preview'), findsOneWidget);
+    await tester.longPress(find.bySemanticsLabel('Hello preview'));
+    await tester.pumpAndSettle();
+    expect(copied, 'Hello preview');
+    copied = null;
     await tester.tap(find.bySemanticsLabel('Hello preview'));
     await tester.pump();
     await tester.tap(find.text('Copy selected'));

@@ -473,11 +473,40 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _scan() async {
+  Future<void> _scan({bool photoMode = false}) async {
     final pages = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(builder: (_) => const LiveScannerScreen()),
+      MaterialPageRoute(builder: (_) => LiveScannerScreen(photoMode: photoMode)),
     );
-    if (pages != null && pages.isNotEmpty) await _saveScan(pages);
+    if (pages == null || pages.isEmpty || !mounted) return;
+    final format = await showDialog<String>(context: context, builder: (context) => SimpleDialog(
+      title: const Text('Save captured images'),
+      children: [
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 'jpg'), child: const Text('Save JPG images to Gallery')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 'pdf'), child: const Text('Convert to PDF')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 'both'), child: const Text('Save JPG images, then create PDF')),
+      ],
+    ));
+    if (format != null) await _saveCaptured(pages, format);
+  }
+
+  Future<void> _saveCaptured(List<String> pages, String format) async {
+    if (!mounted || _busy) return;
+    if (format == 'pdf') { await _saveScan(pages); return; }
+    setState(() => _busy = true);
+    var saved = false;
+    try {
+      await _scanDrafts.exportJpgs(pages, _service.saveJpgToGallery);
+      if (format == 'jpg') await _scanDrafts.discard(pages);
+      saved = true;
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved ${pages.length} JPG image(s) to Gallery')));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('JPG export incomplete: $error. Captured images are retained.'),
+        action: SnackBarAction(label: 'Retry', onPressed: () => _saveCaptured(pages, format)),
+      ));
+    } finally { if (mounted) setState(() => _busy = false); }
+    if (saved && format == 'both') await _saveScan(pages);
   }
 
   Future<void> _saveScan(List<String> pages) async {
@@ -786,27 +815,35 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _delete(PdfRecord record) async {
     if (!_recordOperations.add(record.path)) return;
     try {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete PDF?'),
-        content: Text(record.name),
+        title: const Text('Remove PDF'),
+        content: Text('${record.name}\n\nRemove from My PDFs keeps the file on your device. Delete from device permanently removes this file.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'device'),
+            child: const Text('Delete from device'),
+          ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            onPressed: () => Navigator.pop(context, 'library'),
+            child: const Text('Remove from My PDFs'),
           ),
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed == null) return;
     final file = File(record.path);
-    if (await file.exists()) await file.delete();
-    await _store.remove(record.path);
+    if (confirmed == 'device') {
+      if (await file.exists()) await file.delete();
+      await _store.remove(record.path);
+    } else {
+      await _store.removeFromLibrary(record.path);
+    }
     await _loadFiles();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete PDF: $e')));
@@ -949,6 +986,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisSpacing: 12,
                     childAspectRatio: 1.42,
                     children: [
+                      _ToolCard(
+                        icon: Icons.camera_alt_outlined,
+                        title: 'Camera photo', subtitle: 'Original photo • JPG / PDF',
+                        onTap: _busy ? null : () => _scan(photoMode: true),
+                      ),
                       _ToolCard(
                         icon: Icons.image_rounded,
                         title: 'Image to PDF',

@@ -14,9 +14,10 @@ import 'signature_screen.dart';
 import 'signature_geometry.dart';
 
 class SignaturePlacementScreen extends StatefulWidget {
-  const SignaturePlacementScreen({super.key, required this.service});
+  const SignaturePlacementScreen({super.key, required this.service, this.initialSignature});
 
   final PdfService service;
+  final Uint8List? initialSignature;
 
   @override
   State<SignaturePlacementScreen> createState() =>
@@ -53,6 +54,13 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
 
   bool _busy = false;
   String _status = 'Choose a PDF and draw your signature.';
+
+  @override
+  void initState() {
+    super.initState();
+    _signature = widget.initialSignature;
+    if (_signature != null) _updateSignatureImage();
+  }
 
   Future<String?> _askPassword() async {
     final controller = TextEditingController();
@@ -439,7 +447,24 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                             }
 
                             final placement = _placement(width, height);
-                            return SizedBox(
+                            return GestureDetector(
+                              key: const ValueKey('signature-page-gestures'),
+                              behavior: HitTestBehavior.opaque,
+                              onScaleStart: _busy || signature == null ? null : (_) {
+                                _startWidth = _widthFraction;
+                                _startRotation = _rotationDegrees;
+                              },
+                              onScaleUpdate: _busy || signature == null ? null : (details) {
+                                setState(() {
+                                  _x += details.focalPointDelta.dx / width;
+                                  _y += details.focalPointDelta.dy / height;
+                                  _widthFraction = (_startWidth * details.scale).clamp(.03, .95);
+                                  _rotationDegrees = ((_startRotation + details.rotation * 180 / math.pi + 180) % 360) - 180;
+                                  _updateSignatureImage();
+                                  _clampPlacement();
+                                });
+                              },
+                              child: SizedBox(
                               width: width,
                               height: height,
                               child: Stack(
@@ -457,43 +482,9 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                                       top: placement.top,
                                       width: placement.width,
                                       height: placement.height,
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.translucent,
-                                        onScaleStart: (_) {
-                                          if (_busy) return;
-                                          _startWidth = _widthFraction;
-                                          _startRotation = _rotationDegrees;
-                                        },
-                                        onScaleUpdate: (details) {
-                                          if (_busy) return;
-                                          setState(() {
-                                            _x =
-                                                (_x +
-                                                        details
-                                                                .focalPointDelta
-                                                                .dx /
-                                                            width)
-                                                    .clamp(0.0, 0.92);
-                                            _y =
-                                                (_y +
-                                                        details
-                                                                .focalPointDelta
-                                                                .dy /
-                                                            height)
-                                                    .clamp(0.0, 0.92);
-                                            _widthFraction =
-                                                (_startWidth * details.scale)
-                                                    .clamp(0.12, 0.75);
-                                            _rotationDegrees =
-                                                _startRotation +
-                                                details.rotation *
-                                                    180 /
-                                                    math.pi;
-                                            _updateSignatureImage();
-                                            _clampPlacement();
-                                          });
-                                        },
+                                      child: IgnorePointer(
                                         child: DecoratedBox(
+                                            key: const ValueKey('placed-signature'),
                                             decoration: BoxDecoration(
                                               border: Border.all(
                                                 color: Theme.of(
@@ -511,11 +502,29 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                                     ),
                                 ],
                               ),
-                            );
+                            ));
                           },
                         ),
                 ),
               ),
+              if (signature != null && preview != null) ...[
+                Row(children: [
+                  const SizedBox(width: 12), const Text('Size'),
+                  Expanded(child: Slider(value: _widthFraction, min: .03, max: .95,
+                    onChanged: _busy ? null : (value) => setState(() {
+                      _widthFraction = value; _clampPlacement();
+                    }))),
+                  Text('${(_widthFraction * 100).round()}%'), const SizedBox(width: 12),
+                ]),
+                Row(children: [
+                  const SizedBox(width: 12), const Text('Rotate'),
+                  Expanded(child: Slider(value: _rotationDegrees, min: -180, max: 180,
+                    onChanged: _busy ? null : (value) => setState(() {
+                      _rotationDegrees = value; _updateSignatureImage(); _clampPlacement();
+                    }))),
+                  Text('${_rotationDegrees.round()}°'), const SizedBox(width: 12),
+                ]),
+              ],
               if (signature != null && preview != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
@@ -524,7 +533,7 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
                       const Icon(Icons.open_with_rounded, size: 18),
                       const SizedBox(width: 6),
                       const Expanded(
-                        child: Text('Drag to move • pinch to resize/rotate'),
+                        child: Text('Drag anywhere • pinch to resize/rotate'),
                       ),
                       TextButton(
                         onPressed: _busy ? null : () => setState(() {

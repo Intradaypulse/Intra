@@ -101,6 +101,25 @@ class ScanDraftStore {
     }
   }
 
+  /// Retrying a partly completed batch skips already-confirmed Gallery copies.
+  Future<void> exportJpgs(List<String> pages, Future<String> Function(File) export) => _mutations.run(() async {
+    if (pages.isEmpty) return;
+    final receipt = File('${File(pages.first).parent.path}/gallery.json');
+    final saved = await receipt.exists()
+      ? Map<String, dynamic>.from(jsonDecode(await receipt.readAsString()) as Map)
+      : <String, dynamic>{};
+    for (final path in pages) {
+      if (saved.containsKey(path)) continue;
+      saved[path] = await export(File(path));
+      final pending = File('${receipt.path}.pending');
+      _writing.add(pending.path);
+      try {
+        await pending.writeAsString(jsonEncode(saved), flush: true);
+        await pending.rename(receipt.path);
+      } finally { _writing.remove(pending.path); }
+    }
+  });
+
   /// Commit the destination before writing any PDF bytes. The stable session ID
   /// also covers a process kill while the receipt itself is being published.
   Future<File> reserveOutput(List<String> pages) async {
