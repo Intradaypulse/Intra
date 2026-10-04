@@ -18,6 +18,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.text.TextPosition
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -59,13 +60,15 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                     return@setMethodCallHandler
                 }
-                if (call.method != "append" && call.method != "checkModify") { result.notImplemented(); return@setMethodCallHandler }
+                if (call.method != "append" && call.method != "checkModify" && call.method != "stampSignature") { result.notImplemented(); return@setMethodCallHandler }
                 val source = call.argument<String>("source")
                 val output = call.argument<String>("output")
                 val manifest = call.argument<String>("manifest")
+                val signature = call.argument<ByteArray>("image")
                 val password = call.argument<String>("password") ?: ""
                 val token = call.argument<String>("token") ?: java.util.UUID.randomUUID().toString()
-                if (source == null || (call.method == "append" && (output == null || manifest == null))) {
+                if (source == null || (call.method == "append" && (output == null || manifest == null)) ||
+                    (call.method == "stampSignature" && (output == null || signature == null))) {
                     result.error("ARGUMENT", "Missing document paths", null)
                     return@setMethodCallHandler
                 }
@@ -78,6 +81,14 @@ class MainActivity : FlutterActivity() {
                             PDDocument.load(File(source), password, MemoryUsageSetting.setupTempFileOnly().setTempDir(cacheDir)).use { doc ->
                                 if (!doc.currentAccessPermission.canModify()) throw OwnerPasswordRequiredException()
                             }
+                        } else if (call.method == "stampSignature") {
+                            appendSignature(File(source), File(output!!), signature!!,
+                                call.argument<Int>("page") ?: -1,
+                                (call.argument<Number>("x") ?: Double.NaN).toFloat(),
+                                (call.argument<Number>("y") ?: Double.NaN).toFloat(),
+                                (call.argument<Number>("width") ?: Double.NaN).toFloat(),
+                                (call.argument<Number>("height") ?: Double.NaN).toFloat(),
+                                password, cancelled)
                         } else {
                             appendOverlay(File(source), File(output!!), File(manifest!!), password, cancelled)
                         }
@@ -87,7 +98,7 @@ class MainActivity : FlutterActivity() {
                             val code = when (error) {
                                 is OwnerPasswordRequiredException -> "OCR_OWNER_PASSWORD_REQUIRED"
                                 is InvalidPasswordException -> "OCR_WRONG_PASSWORD"
-                                else -> "OCR_OVERLAY"
+                                else -> if (call.method == "stampSignature") "SIGNATURE_SAVE" else "OCR_OVERLAY"
                             }
                             result.error(code, error.message ?: "Could not add OCR layer", null)
                         }
@@ -103,6 +114,38 @@ class MainActivity : FlutterActivity() {
         ownedCancellations.values.forEach { it.set(true) }
         pdfWorker.shutdown()
         super.onDestroy()
+    }
+
+    private fun appendSignature(source: File, output: File, image: ByteArray,
+                                pageIndex: Int, x: Float, y: Float, width: Float, height: Float,
+                                password: String, cancelled: AtomicBoolean) {
+        require(source.canonicalPath != output.canonicalPath) { "Output must be a new copy" }
+        require(!output.exists()) { "Output already exists" }
+        require(x.isFinite() && y.isFinite() && width.isFinite() && height.isFinite() &&
+            width > 0 && height > 0 && image.isNotEmpty()) { "Invalid signature bounds" }
+        check(!cancelled.get()) { "Signature cancelled" }
+        try {
+            val memory = MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(cacheDir)
+            PDDocument.load(source, password, memory).use { doc ->
+                if (!doc.currentAccessPermission.canModify()) throw OwnerPasswordRequiredException()
+                require(pageIndex in 0 until doc.numberOfPages) { "Invalid signature page" }
+                val page = doc.getPage(pageIndex)
+                val ink = PDImageXObject.createFromByteArray(doc, image, "signature.png")
+                check(!cancelled.get()) { "Signature cancelled" }
+                // Reset inherited transforms/clipping. Draw directly into page
+                // content so Android PdfRenderer and external viewers show it.
+                PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use {
+                    it.drawImage(ink, x, y, width, height)
+                }
+                // PDFBox closes the supplied stream itself.
+                CancellableOutputStream(FileOutputStream(output), cancelled).use { doc.save(it) }
+                check(!cancelled.get()) { "Signature cancelled" }
+                FileOutputStream(output, true).use { it.fd.sync() }
+            }
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        }
     }
 
     private fun appendOverlay(source: File, output: File, manifest: File, password: String,

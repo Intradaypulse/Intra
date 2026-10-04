@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart' as pf;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
+import 'package:pdfx/pdfx.dart' as viewer;
 import 'package:pdfmate/pdf_service.dart';
 import 'package:pdfmate/signature_screen.dart';
 import 'package:pdfmate/signature_store.dart';
@@ -52,6 +53,7 @@ void registerSignatureCases() {
         pageFormat: const pf.PdfPageFormat(400, 600), margin: pw.EdgeInsets.zero,
         build: (_) => pw.Container(width: 400, height: 600, color: pf.PdfColors.red)));
       final source = await File('${root.path}/red.pdf').writeAsBytes(await pdf.save());
+      final sourceBytes = await source.readAsBytes();
       final before = img.decodeImage((await service.renderPage(source, 0, width: 800))!)!;
       expect(before.getPixel(20, 20).r, greaterThan(240));
       expect(before.getPixel(20, 20).g, lessThan(100));
@@ -87,6 +89,22 @@ void registerSignatureCases() {
         expect(changed, greaterThan(300));
         expect(changed, lessThan(width * height * scaleX * scaleY * .35));
         expect(white, 0, reason: 'Transparent signature must not cover the document with white');
+        // Use the same Android PdfRenderer path as the app's PDF viewer.
+        // A stamp annotation can pass the engine checks yet disappear here.
+        final native = await viewer.PdfDocument.openFile(signed.path);
+        try {
+          final page = await native.getPage(1);
+          try {
+            final bitmap = await page.render(width: 800, height: 1200,
+              format: viewer.PdfPageImageFormat.png, backgroundColor: '#FFFFFF');
+            expect(bitmap, isNotNull);
+            final displayed = img.decodeImage(bitmap!.bytes)!;
+            final visibleInk = displayed.where((p) => p.r < 80 && p.g < 80 && p.b < 80).length;
+            expect(visibleInk, greaterThan(300), reason: 'App viewer must show ink at angle $angle');
+            debugPrint('SIGNATURE_VIEWER_QA angle=$angle visibleInk=$visibleInk');
+          } finally { await page.close(); }
+        } finally { await native.close(); }
+        expect(await source.readAsBytes(), sourceBytes);
       }
       expect(tester.takeException(), isNull);
     } finally {

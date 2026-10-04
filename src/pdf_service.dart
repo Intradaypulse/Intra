@@ -1024,6 +1024,21 @@ class PdfService {
     required int page,
     required PdfRect rect,
   }) async {
+    if (Platform.isAndroid) {
+      // Android's PdfRenderer (used by our viewer) omits stamp annotations.
+      // Append the ink as page content while keeping existing forms/annotations.
+      final output = await _newFile('Signed');
+      try {
+        await const MethodChannel('pdfmate/unicode_overlay').invokeMethod<void>('stampSignature', {
+          'source': source.path, 'output': output.path, 'image': signaturePng,
+          'page': page, 'x': rect.x, 'y': rect.y, 'width': rect.width, 'height': rect.height,
+        });
+        return await _commitOutput(output);
+      } catch (_) {
+        try { if (await output.exists()) await output.delete(); } catch (_) {}
+        rethrow;
+      } finally { _pendingOutputs.remove(output.path); }
+    }
     return _writeNewPdf('Signed', (pdf, sink) => pdf.addImageStamp(
       FileSource(source), sink, page: page,
       imageData: MemorySource(signaturePng), rect: rect,
