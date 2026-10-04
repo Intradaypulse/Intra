@@ -1,6 +1,6 @@
 # PDFMate production release checklist
 
-PDFMate must never store production credentials in Dart source or committed workflow files.
+PDFMate must never store private production credentials in Dart source or committed workflow files. AdMob app/ad-unit identifiers are public SDK configuration, not account credentials.
 Configure these values under **GitHub repository → Settings → Secrets and variables → Actions**.
 
 ## Android signing
@@ -17,6 +17,15 @@ Configure these values under **GitHub repository → Settings → Secrets and va
 - `ADMOB_APP_OPEN_ID` — `ca-app-pub-.../...`
 
 The production workflow rejects Google's sample/test publisher IDs and malformed AdMob IDs.
+
+### Supplied ScanLumo identifiers
+The owner supplied these public IDs on 4 October 2026:
+- App: `ca-app-pub-4375542757188713~4072508265`
+- Banner (`scan`): `ca-app-pub-4375542757188713/3974279220`
+- Interstitial (`scan Interstitial`): `ca-app-pub-4375542757188713/8696122864`
+
+Production workflow and readiness checks use these as fallbacks; matching repository Secrets or Variables override them. Rewarded and App-Open IDs are still required. Supplying identifiers does not verify AdMob readiness or ad serving. Beta APKs retain test ad configuration. This mapping does not rename the app or change its package identity.
+
 
 ## Firebase
 - `FIREBASE_API_KEY`
