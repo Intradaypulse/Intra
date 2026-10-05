@@ -1023,26 +1023,48 @@ class PdfService {
     Uint8List signaturePng, {
     required int page,
     required PdfRect rect,
+    String? password,
   }) async {
     if (Platform.isAndroid) {
       // Android's PdfRenderer (used by our viewer) omits stamp annotations.
       // Append the ink as page content while keeping existing forms/annotations.
       final output = await _newFile('Signed');
       try {
-        await const MethodChannel('pdfmate/unicode_overlay').invokeMethod<void>('stampSignature', {
-          'source': source.path, 'output': output.path, 'image': signaturePng,
-          'page': page, 'x': rect.x, 'y': rect.y, 'width': rect.width, 'height': rect.height,
-        });
+        await const MethodChannel('pdfmate/unicode_overlay')
+            .invokeMethod<void>('stampSignature', {
+              'source': source.path,
+              'output': output.path,
+              'image': signaturePng,
+              'password': password ?? '',
+              'page': page,
+              'x': rect.x,
+              'y': rect.y,
+              'width': rect.width,
+              'height': rect.height,
+            });
         return await _commitOutput(output);
       } catch (_) {
-        try { if (await output.exists()) await output.delete(); } catch (_) {}
+        try {
+          if (await output.exists()) await output.delete();
+        } catch (_) {}
         rethrow;
-      } finally { _pendingOutputs.remove(output.path); }
+      } finally {
+        _pendingOutputs.remove(output.path);
+      }
     }
-    return _writeNewPdf('Signed', (pdf, sink) => pdf.addImageStamp(
-      FileSource(source), sink, page: page,
-      imageData: MemorySource(signaturePng), rect: rect,
-    ));
+    return _writeNewPdf('Signed', (pdf, sink) async {
+      final editor = await pdf.edit(FileSource(source), password: password);
+      try {
+        await editor.addImageStamp(
+          page,
+          MemorySource(signaturePng),
+          rect: rect,
+        );
+        await editor.save(sink);
+      } finally {
+        await editor.dispose();
+      }
+    });
   }
 
   Future<PdfDoc> openPdfDoc(Pdf pdf, File source, {String? password}) {

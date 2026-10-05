@@ -42,6 +42,50 @@ class MainActivity : FlutterActivity() {
     }
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        MethodChannel(engine.dartExecutor.binaryMessenger, "pdfmate/downloads")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "list" -> {
+                            val collection = android.provider.MediaStore.Files.getContentUri("external")
+                            val modern = android.os.Build.VERSION.SDK_INT >= 29
+                            val pathColumn = if (modern) android.provider.MediaStore.MediaColumns.RELATIVE_PATH
+                                else android.provider.MediaStore.MediaColumns.DATA
+                            val prefix = if (modern) "Download/PDFMate/" else
+                                android.os.Environment.getExternalStoragePublicDirectory(
+                                    android.os.Environment.DIRECTORY_DOWNLOADS).absolutePath + "/PDFMate/"
+                            val rows = mutableListOf<Map<String, Any>>()
+                            contentResolver.query(collection, arrayOf("_id", "_display_name", "date_modified"),
+                                "mime_type = ? AND $pathColumn LIKE ?", arrayOf("application/pdf", "$prefix%"),
+                                "date_modified DESC, _id DESC")?.use { cursor ->
+                                while (cursor.moveToNext()) rows.add(mapOf(
+                                    "uri" to android.content.ContentUris.withAppendedId(collection, cursor.getLong(0)).toString(),
+                                    "name" to (cursor.getString(1) ?: "PDF"),
+                                    "modified" to cursor.getLong(2)))
+                            }
+                            result.success(rows)
+                        }
+                        "open" -> {
+                            val uri = android.net.Uri.parse(call.argument<String>("uri") ?: "")
+                            require(uri.scheme == "content" && uri.authority == "media")
+                            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                .setDataAndType(uri, "application/pdf")
+                                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                            result.success(null)
+                        }
+                        "browse" -> {
+                            val uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2FPDFMate")
+                            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                .setDataAndType(uri, "vnd.android.document/directory")
+                                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (error: Exception) {
+                    result.error("DOWNLOADS", error.message ?: "Could not open Downloads/PDFMate", null)
+                }
+            }
         PDFBoxResourceLoader.init(applicationContext)
         // Recover private scratch left by process termination. A second engine
         // must not delete a worker directory that is still in use in this process.

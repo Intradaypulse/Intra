@@ -19,6 +19,7 @@ class _PlacementService extends PdfService {
   final File source;
   final List<PdfPageInfo> infos;
   final Uint8List preview;
+  @override Future<bool> hasDigitalSignatures(File source, {String? password}) async => false;
   @override Future<File?> pickPdfFile() async => source;
   @override Future<List<PdfPageInfo>> pageInfos(File source, {String? password}) async => infos;
   @override Future<PdfRect> pageVisibleBox(File source, int page, {String? password}) async =>

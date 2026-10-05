@@ -1,3 +1,4 @@
+import 'downloads_screen.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -873,10 +874,13 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(Icons.picture_as_pdf_rounded),
             SizedBox(width: 10),
-            Text('ScanLumo Beta'),
+            Flexible(child: Text('ScanLumo Beta', overflow: TextOverflow.ellipsis)),
           ],
         ),
         actions: [
+          IconButton(tooltip: 'Downloads/PDFMate', icon: const Icon(Icons.folder_open),
+            onPressed: _busy ? null : () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const DownloadsScreen()))),
           IconButton(tooltip: 'Removed PDFs', icon: const Icon(Icons.restore_page_outlined),
             onPressed: _busy ? null : () async {
               await Navigator.of(context).push<void>(MaterialPageRoute(
