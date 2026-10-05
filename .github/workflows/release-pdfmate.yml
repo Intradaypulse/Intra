@@ -1,4 +1,4 @@
-name: Build PDFMate Release AAB
+name: Build ScanLumo Release AAB
 
 on:
   workflow_dispatch:
@@ -23,16 +23,20 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
-          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
-          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
-          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
-          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID }}
-          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID || vars.ADMOB_APP_ID || 'ca-app-pub-4375542757188713~4072508265' }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID || vars.ADMOB_BANNER_ID || 'ca-app-pub-4375542757188713/3974279220' }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID || vars.ADMOB_INTERSTITIAL_ID || 'ca-app-pub-4375542757188713/8696122864' }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID || vars.ADMOB_REWARDED_ID || 'ca-app-pub-4375542757188713/3609559552' }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID || vars.ADMOB_APP_OPEN_ID || 'ca-app-pub-4375542757188713/9984144645' }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || vars.FIREBASE_API_KEY || 'AIzaSyAHa_Q3kYxtCegTeNjpPxTeU0TZeu571rQ' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || vars.FIREBASE_APP_ID || '1:637168665685:android:f61330d64a9795b47c00dc' }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID || 'scanlumo' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || vars.FIREBASE_MESSAGING_SENDER_ID || '637168665685' }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || vars.FIREBASE_STORAGE_BUCKET || 'scanlumo.firebasestorage.app' }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
         run: |
           require() {
             local name="$1"
@@ -43,6 +47,10 @@ jobs:
             fi
           }
 
+          require ANDROID_UPLOAD_CERT_SHA256 "$ANDROID_UPLOAD_CERT_SHA256"
+          require PDFMATE_OPERATOR_NAME "$PDFMATE_OPERATOR_NAME"
+          require PDFMATE_PRIVACY_EMAIL "$PDFMATE_PRIVACY_EMAIL"
+          require PDFMATE_PRIVACY_URL "$PDFMATE_PRIVACY_URL"
           require ANDROID_KEYSTORE_BASE64 "$KEYSTORE_B64"
           require ANDROID_KEYSTORE_PASSWORD "$KEYSTORE_PASSWORD"
           require ANDROID_KEY_ALIAS "$KEY_ALIAS"
@@ -84,6 +92,28 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
 
+      - name: Validate production values
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID || vars.ADMOB_APP_ID || 'ca-app-pub-4375542757188713~4072508265' }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID || vars.ADMOB_BANNER_ID || 'ca-app-pub-4375542757188713/3974279220' }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID || vars.ADMOB_INTERSTITIAL_ID || 'ca-app-pub-4375542757188713/8696122864' }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID || vars.ADMOB_REWARDED_ID || 'ca-app-pub-4375542757188713/3609559552' }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID || vars.ADMOB_APP_OPEN_ID || 'ca-app-pub-4375542757188713/9984144645' }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || vars.FIREBASE_API_KEY || 'AIzaSyAHa_Q3kYxtCegTeNjpPxTeU0TZeu571rQ' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || vars.FIREBASE_APP_ID || '1:637168665685:android:f61330d64a9795b47c00dc' }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID || 'scanlumo' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || vars.FIREBASE_MESSAGING_SENDER_ID || '637168665685' }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || vars.FIREBASE_STORAGE_BUCKET || 'scanlumo.firebasestorage.app' }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
+        run: python3 scripts/check_production_config.py
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
@@ -110,12 +140,16 @@ jobs:
 
       - name: Configure Android release
         env:
-          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
-          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID || vars.ADMOB_APP_ID || 'ca-app-pub-4375542757188713~4072508265' }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || vars.FIREBASE_API_KEY || 'AIzaSyAHa_Q3kYxtCegTeNjpPxTeU0TZeu571rQ' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || vars.FIREBASE_APP_ID || '1:637168665685:android:f61330d64a9795b47c00dc' }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID || 'scanlumo' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || vars.FIREBASE_MESSAGING_SENDER_ID || '637168665685' }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || vars.FIREBASE_STORAGE_BUCKET || 'scanlumo.firebasestorage.app' }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > buildapp/android/app/pdfmate-upload.jks
           python3 - <<'PY'
@@ -189,7 +223,7 @@ jobs:
                   '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n'
                   '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>'
               )
-          s = s.replace('android:label="pdfmate"', 'android:label="PDFMate"')
+          s = s.replace('android:label="pdfmate"', 'android:label="ScanLumo"')
           s = s.replace(
               'android:icon="@mipmap/ic_launcher"',
               'android:icon="@drawable/pdfmate_launcher_icon" '
@@ -283,8 +317,19 @@ jobs:
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
         run: |
           keytool -list             -keystore buildapp/android/app/pdfmate-upload.jks             -storepass "$ANDROID_KEYSTORE_PASSWORD"             -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          keytool -exportcert -keystore buildapp/android/app/pdfmate-upload.jks -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" -file /tmp/pdfmate-upload-cert.der
+          python3 - <<'PYVERIFY'
+          import hashlib, os
+          from pathlib import Path
+          expected = os.environ['ANDROID_UPLOAD_CERT_SHA256'].replace(':', '').lower()
+          actual = hashlib.sha256(Path('/tmp/pdfmate-upload-cert.der').read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit('Upload certificate does not match the pinned signing identity. Refusing release.')
+          print('Pinned upload certificate verified.')
+          PYVERIFY
           echo "Upload keystore alias verified."
 
       - name: Resolve and analyze
@@ -309,15 +354,19 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
-          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
-          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
-          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID }}
-          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID || vars.ADMOB_BANNER_ID || 'ca-app-pub-4375542757188713/3974279220' }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID || vars.ADMOB_INTERSTITIAL_ID || 'ca-app-pub-4375542757188713/8696122864' }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID || vars.ADMOB_REWARDED_ID || 'ca-app-pub-4375542757188713/3609559552' }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID || vars.ADMOB_APP_OPEN_ID || 'ca-app-pub-4375542757188713/9984144645' }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || vars.FIREBASE_API_KEY || 'AIzaSyAHa_Q3kYxtCegTeNjpPxTeU0TZeu571rQ' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || vars.FIREBASE_APP_ID || '1:637168665685:android:f61330d64a9795b47c00dc' }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID || 'scanlumo' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || vars.FIREBASE_MESSAGING_SENDER_ID || '637168665685' }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || vars.FIREBASE_STORAGE_BUCKET || 'scanlumo.firebasestorage.app' }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
         shell: bash
         run: |
           args=(
@@ -331,6 +380,9 @@ jobs:
             --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID"
             --dart-define=FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET"
+            --dart-define=PDFMATE_OPERATOR_NAME="$PDFMATE_OPERATOR_NAME"
+            --dart-define=PDFMATE_PRIVACY_EMAIL="$PDFMATE_PRIVACY_EMAIL"
+            --dart-define=PDFMATE_PRIVACY_URL="$PDFMATE_PRIVACY_URL"
           )
           flutter build appbundle "${args[@]}"
           flutter build apk --release --split-per-abi "${args[@]}"
@@ -342,11 +394,11 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           test -f buildapp/build/app/outputs/bundle/release/app-release.aab
-          cp buildapp/build/app/outputs/bundle/release/app-release.aab PDFMate-release.aab
+          cp buildapp/build/app/outputs/bundle/release/app-release.aab ScanLumo-release.aab
           # Trust only the configured upload identity, not an arbitrary signer.
           keytool -exportcert -keystore buildapp/android/app/pdfmate-upload.jks -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" -file /tmp/pdfmate-upload.cer
           keytool -importcert -noprompt -keystore /tmp/pdfmate-verify.p12 -storepass verification-only -alias expected-upload -file /tmp/pdfmate-upload.cer
-          jarsigner -verify -strict -certs -keystore /tmp/pdfmate-verify.p12 -storepass verification-only PDFMate-release.aab expected-upload
+          jarsigner -verify -strict -certs -keystore /tmp/pdfmate-verify.p12 -storepass verification-only ScanLumo-release.aab expected-upload
 
           mkdir -p release-apks
           cp buildapp/build/app/outputs/flutter-apk/app-*-release.apk release-apks/
@@ -359,9 +411,9 @@ jobs:
             "$APKSIGNER" verify --verbose --print-certs "$apk"
           done
 
-          sha256sum PDFMate-release.aab | tee PDFMate-release.aab.sha256
-          sha256sum release-apks/*.apk | tee PDFMate-release-apks.sha256
-          ls -lh PDFMate-release.aab release-apks/*.apk
+          sha256sum ScanLumo-release.aab | tee ScanLumo-release.aab.sha256
+          sha256sum release-apks/*.apk | tee ScanLumo-release-apks.sha256
+          ls -lh ScanLumo-release.aab release-apks/*.apk
 
       - name: Enable KVM for production startup test
         run: |
@@ -384,18 +436,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Production-startup-diagnostics
+          name: ScanLumo-Production-startup-diagnostics
           path: release-launch-logs/
           if-no-files-found: ignore
 
       - name: Upload production release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Production-Release
+          name: ScanLumo-Production-Release
           path: |
-            PDFMate-release.aab
-            PDFMate-release.aab.sha256
-            PDFMate-release-apks.sha256
+            ScanLumo-release.aab
+            ScanLumo-release.aab.sha256
+            ScanLumo-release-apks.sha256
             release-apks/*.apk
           if-no-files-found: error
           retention-days: 30

@@ -12,7 +12,8 @@ import 'scan_capture_gate.dart';
 import 'crop_geometry.dart';
 
 class LiveScannerScreen extends StatefulWidget {
-  const LiveScannerScreen({super.key});
+  const LiveScannerScreen({super.key, this.photoMode = false});
+  final bool photoMode;
 
   @override
   State<LiveScannerScreen> createState() => _LiveScannerScreenState();
@@ -64,6 +65,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
   @override
   void initState() {
     super.initState();
+    _autoCapture = !widget.photoMode;
     WidgetsBinding.instance.addObserver(this);
     _start();
   }
@@ -88,7 +90,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
 
       final controller = CameraController(
         back,
-        ResolutionPreset.veryHigh,
+        widget.photoMode ? ResolutionPreset.max : ResolutionPreset.veryHigh,
         enableAudio: false,
         imageFormatGroup: Platform.isIOS
             ? ImageFormatGroup.bgra8888
@@ -284,6 +286,14 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
       capturedPhotoPath = capturedPath;
       _tempSession.own(capturedPath);
 
+      if (widget.photoMode) {
+        // Persist the actual still-camera file, never an analyzer/preview frame.
+        final file = await _drafts.append(await File(capturedPath).readAsBytes());
+        _tempSession.own(file.path);
+        if (mounted) setState(() { _pages.add(file); _hint = 'Photo ${_pages.length} added'; });
+        return;
+      }
+
       final detected = await _detector.detect(
         ScanInput.file(capturedPath),
         sensitivity: DetectionSensitivity.strict,
@@ -359,12 +369,12 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     if (_capturing || _confirmingExit) return;
     _confirmingExit = true;
     final choice = await showDialog<String>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Keep your scanned pages?'),
-      content: const Text('Save these pages as a PDF, continue scanning, or discard them.'),
+      title: const Text('Keep your captured images?'),
+      content: const Text('Continue to choose JPG or PDF, keep scanning, or discard these images.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, 'continue'), child: const Text('Continue scanning')),
         TextButton(onPressed: () => Navigator.pop(context, 'discard'), child: const Text('Discard')),
-        FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Save PDF')),
+        FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Continue to save')),
       ],
     ));
     _confirmingExit = false;
@@ -387,6 +397,26 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.of(context).pop<List<String>>(paths);
     });
+  }
+
+  Future<void> _editPages(List<File> pages, {File? removed}) async {
+    if (_capturing || _confirmingExit) return;
+    setState(() => _capturing = true);
+    try {
+      final paths = pages.map((page) => page.path).toList();
+      if (removed == null) {
+        await _drafts.persistOrder(paths);
+      } else {
+        await _drafts.removePage(paths, removed.path);
+        _tempSession.forget(removed.path);
+      }
+      if (!mounted) return;
+      setState(() { _pages.clear(); _pages.addAll(pages); });
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Could not update scan pages: $error');
+    } finally {
+      if (mounted) setState(() => _capturing = false);
+    }
   }
 
   Future<void> _teardown() => _queueCamera(_teardownCamera);
@@ -438,7 +468,7 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         title: Text(
-          _pages.isEmpty ? 'Scan document' : '${_pages.length} page(s)',
+          _pages.isEmpty ? (widget.photoMode ? 'Capture original photo' : 'Scan document') : '${_pages.length} page(s)',
         ),
         actions: [
           IconButton(
@@ -535,10 +565,11 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                       padding: const EdgeInsets.all(8),
                       itemCount: _pages.length,
                       onReorderItem: (oldIndex, newIndex) {
-                        setState(() {
-                          final page = _pages.removeAt(oldIndex);
-                          _pages.insert(newIndex, page);
-                        });
+                        if (_capturing) return;
+                        final reordered = List<File>.from(_pages);
+                        final page = reordered.removeAt(oldIndex);
+                        reordered.insert(newIndex, page);
+                        unawaited(_editPages(reordered));
                       },
                       itemBuilder: (context, index) {
                         return Container(
@@ -566,11 +597,10 @@ class _LiveScannerScreenState extends State<LiveScannerScreen>
                                   child: InkWell(
                                     customBorder: const CircleBorder(),
                                     onTap: () {
+                                      if (_capturing) return;
                                       final page = _pages[index];
-                                      setState(() => _pages.removeAt(index));
-                                      unawaited(
-                                        _tempSession.deletePath(page.path),
-                                      );
+                                      final remaining = List<File>.from(_pages)..removeAt(index);
+                                      unawaited(_editPages(remaining, removed: page));
                                     },
                                     child: const Padding(
                                       padding: EdgeInsets.all(4),

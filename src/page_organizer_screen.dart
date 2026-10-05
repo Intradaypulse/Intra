@@ -3,10 +3,11 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:pdf_manipulator/pdf_manipulator.dart';
 
 import 'lru_future_cache.dart';
 import 'pdf_service.dart';
+import 'output_protection.dart';
+import 'pdf_password_dialog.dart';
 
 class _PageItem {
   _PageItem({required this.originalIndex});
@@ -40,38 +41,6 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
     unawaited(widget.service.secureDeleteTemporary(_source));
     _thumbCache.clear();
     super.dispose();
-  }
-
-  Future<String?> _askPassword() async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('PDF password'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            labelText: 'Password',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Open'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return value;
   }
 
   Future<Uint8List?> _thumbnailFor(int originalIndex) {
@@ -125,17 +94,14 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
             await widget.service.secureDeleteTemporary(previous);
           }
           return;
-        } on PdfPasswordRequired {
+        } catch (error) {
+          final failure = pdfPasswordFailure(error);
+          if (failure == null) rethrow;
           if (!mounted) return;
-          password = await _askPassword();
-          if (password == null) return;
-        } on PdfWrongPassword {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Wrong password. Try again.')),
-          );
-          password = await _askPassword();
-          if (password == null) return;
+          final entered = await askPdfPassword(context,
+            title: failure == PdfPasswordFailure.wrong ? 'Wrong password. Try again' : 'PDF password');
+          if (entered == null) return;
+          password = entered;
         }
       }
     } catch (e) {
@@ -192,7 +158,7 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
 
   Future<void> _save() async {
     final source = _source;
-    if (source == null || _pages.isEmpty) return;
+    if (_busy || source == null || _pages.isEmpty) return;
 
     setState(() {
       _busy = true;
@@ -200,6 +166,9 @@ class _PageOrganizerScreenState extends State<PageOrganizerScreen> {
     });
 
     try {
+      if (_password != null || widget.service.wasProtected(source)) {
+        if (!await confirmUnprotectedOutput(context) || !mounted) return;
+      }
       final output = await widget.service.organizePdf(
         source,
         pageOrder: [for (final page in _pages) page.originalIndex],

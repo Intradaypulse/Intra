@@ -1,5 +1,9 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'unicode_overlay_cases.dart';
+import 'deep_audit_cases.dart';
+import 'performance_cases.dart';
+import 'signature_cases.dart';
 
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -11,6 +15,9 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf_manipulator/pdf_manipulator.dart';
 import 'package:pdf_manipulator/io.dart';
 import 'package:pdfmate/live_scanner_screen.dart';
+import 'package:pdfmate/file_store.dart';
+import 'package:pdfmate/removed_pdfs_screen.dart';
+import 'package:pdfmate/signature_store.dart';
 import 'package:pdfmate/main.dart' as app;
 import 'package:pdfmate/pdf_service.dart';
 
@@ -18,6 +25,82 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   registerUnicodeOverlayCases();
+  registerDeepAuditCases();
+  registerPerformanceCases();
+  registerSignatureCases();
+
+  testWidgets('Android removed PDF listing restores bytes and metadata through the screen', (tester) async {
+    final root = await getApplicationDocumentsDirectory();
+    final source = File('${root.path}/qa_restore.pdf');
+    final store = PdfFileStore();
+    final doc = pw.Document()..addPage(pw.Page(build: (_) => pw.Text('Restore invoice')));
+    await source.writeAsBytes(await doc.save());
+    final bytes = await source.readAsBytes();
+    final record = PdfRecord(path: source.path, name: 'Restore invoice', createdAt: DateTime(2020), favorite: true);
+    try {
+      await store.add(record);
+      await store.removeFromLibrary(source.path);
+      expect((await PdfFileStore().loadRemoved()).singleWhere((item) => item.path == source.path).toJson(), record.toJson());
+      await tester.pumpWidget(MaterialApp(home: RemovedPdfsScreen(store: PdfFileStore())));
+      await _waitFor(tester, find.text('Restore invoice'));
+      await tester.tap(find.text('Restore'));
+      await _waitFor(tester, find.text('PDF restored to My PDFs.'));
+      expect((await PdfFileStore().load()).singleWhere((item) => item.path == source.path).toJson(), record.toJson());
+      expect(await source.readAsBytes(), bytes);
+    } finally {
+      await store.remove(source.path);
+      if (await source.exists()) await source.delete();
+    }
+  });
+
+  testWidgets('Android signature backup exports to Downloads and restores without duplicates', (tester) async {
+    final root = await getApplicationDocumentsDirectory();
+    final original = Directory('${root.path}/qa_signature_original');
+    final restored = Directory('${root.path}/qa_signature_restored');
+    try {
+      final store = SignatureStore(directoryProvider: () async => original);
+      final bytes = Uint8List.fromList(img.encodePng(img.Image(width: 100, height: 40)));
+      await store.save('Owner', bytes);
+      final backup = await store.exportBackup();
+      expect(await PdfService().exportSignatureBackup(backup), isNotEmpty);
+      final target = SignatureStore(directoryProvider: () async => restored);
+      expect(await target.restoreBackup(backup), 1);
+      expect(await target.restoreBackup(backup), 0);
+      expect(await (await target.load()).single.file.readAsBytes(), bytes);
+    } finally {
+      if (await original.exists()) await original.delete(recursive: true);
+      if (await restored.exists()) await restored.delete(recursive: true);
+    }
+  });
+
+  testWidgets('camera still JPEG is preserved and converts to a one-page PDF', (tester) async {
+    final cameras = await availableCameras();
+    expect(cameras, isNotEmpty);
+    final controller = CameraController(cameras.first, ResolutionPreset.max, enableAudio: false);
+    File? photo;
+    File? output;
+    try {
+      await controller.initialize();
+      final captured = await controller.takePicture();
+      photo = File(captured.path);
+      final original = await photo.readAsBytes();
+      final decoded = img.decodeJpg(original);
+      expect(decoded, isNotNull);
+      expect(decoded!.width, greaterThan(100));
+      expect(decoded.height, greaterThan(100));
+      final service = PdfService();
+      final uri = await service.saveJpgToGallery(photo);
+      expect(uri, isNotEmpty);
+      expect(await photo.readAsBytes(), original);
+      output = await service.createScannedPdfFromFiles([photo.path]);
+      expect(await service.pageCount(output), 1);
+      expect(await photo.readAsBytes(), original);
+    } finally {
+      await controller.dispose();
+      if (photo != null && await photo.exists()) await photo.delete();
+      if (output != null && await output.exists()) await output.delete();
+    }
+  });
 
   testWidgets(
     'app boots, settings and camera lifecycle work',
@@ -32,7 +115,7 @@ void main() {
         await _settle(tester);
       }
 
-      expect(find.text('PDFMate Beta'), findsOneWidget);
+      expect(find.text('ScanLumo Beta'), findsOneWidget);
       expect(find.text('Scan document'), findsOneWidget);
 
       debugPrint('SMOKE: home ready, opening settings');
@@ -97,7 +180,7 @@ void main() {
 
       await tester.pageBack();
       await _settle(tester);
-      expect(find.text('PDFMate Beta'), findsOneWidget);
+      expect(find.text('ScanLumo Beta'), findsOneWidget);
       debugPrint('SMOKE: lifecycle checks complete');
     },
     timeout: const Timeout(Duration(minutes: 3)),

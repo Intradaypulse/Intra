@@ -1,4 +1,4 @@
-name: Build PDFMate Beta APK
+name: Build ScanLumo Beta APK
 
 on:
   workflow_dispatch:
@@ -30,6 +30,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Report production readiness without exposing credentials
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID || vars.ADMOB_APP_ID || 'ca-app-pub-4375542757188713~4072508265' }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID || vars.ADMOB_BANNER_ID || 'ca-app-pub-4375542757188713/3974279220' }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID || vars.ADMOB_INTERSTITIAL_ID || 'ca-app-pub-4375542757188713/8696122864' }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID || vars.ADMOB_REWARDED_ID || 'ca-app-pub-4375542757188713/3609559552' }}
+          ADMOB_APP_OPEN_ID: ${{ secrets.ADMOB_APP_OPEN_ID || vars.ADMOB_APP_OPEN_ID || 'ca-app-pub-4375542757188713/9984144645' }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || vars.FIREBASE_API_KEY || 'AIzaSyAHa_Q3kYxtCegTeNjpPxTeU0TZeu571rQ' }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || vars.FIREBASE_APP_ID || '1:637168665685:android:f61330d64a9795b47c00dc' }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID || 'scanlumo' }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID || vars.FIREBASE_MESSAGING_SENDER_ID || '637168665685' }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET || vars.FIREBASE_STORAGE_BUCKET || 'scanlumo.firebasestorage.app' }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          PDFMATE_OPERATOR_NAME: ${{ vars.PDFMATE_OPERATOR_NAME }}
+          PDFMATE_PRIVACY_EMAIL: ${{ vars.PDFMATE_PRIVACY_EMAIL }}
+          PDFMATE_PRIVACY_URL: ${{ vars.PDFMATE_PRIVACY_URL }}
+        run: python3 scripts/check_production_config.py --report-only
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -76,7 +98,7 @@ jobs:
                   '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n'
                   '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>'
               )
-          s = s.replace('android:label="pdfmate"', 'android:label="PDFMate"')
+          s = s.replace('android:label="pdfmate"', 'android:label="ScanLumo"')
           s = s.replace(
               'android:icon="@mipmap/ic_launcher"',
               'android:icon="@drawable/pdfmate_launcher_icon" '
@@ -177,17 +199,17 @@ jobs:
       - name: Verify APK
         run: |
           test -f buildapp/build/app/outputs/flutter-apk/app-debug.apk
-          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk PDFMate-Beta-universal.apk
-          sha256sum PDFMate-Beta-universal.apk | tee PDFMate-Beta-universal.apk.sha256
-          ls -lh PDFMate-Beta-universal.apk
+          cp buildapp/build/app/outputs/flutter-apk/app-debug.apk ScanLumo-Beta-universal.apk
+          sha256sum ScanLumo-Beta-universal.apk | tee ScanLumo-Beta-universal.apk.sha256
+          ls -lh ScanLumo-Beta-universal.apk
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Beta-APK
+          name: ScanLumo-Beta-APK
           path: |
-            PDFMate-Beta-universal.apk
-            PDFMate-Beta-universal.apk.sha256
+            ScanLumo-Beta-universal.apk
+            ScanLumo-Beta-universal.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -205,62 +227,66 @@ jobs:
         shell: bash
         run: |
           test -f buildapp/build/app/outputs/bundle/release/app-release.aab
-          cp buildapp/build/app/outputs/bundle/release/app-release.aab PDFMate-RC-test-signed.aab
+          cp buildapp/build/app/outputs/bundle/release/app-release.aab ScanLumo-RC-test-signed.aab
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER"
           for abi in arm64-v8a armeabi-v7a x86_64; do
             python3 scripts/verify_work_database.py "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk"
-            cp "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk" "PDFMate-RC-$abi.apk"
-            "$APKSIGNER" verify --verbose "PDFMate-RC-$abi.apk"
-            sha256sum "PDFMate-RC-$abi.apk" > "PDFMate-RC-$abi.apk.sha256"
+            cp "buildapp/build/app/outputs/flutter-apk/app-$abi-release.apk" "ScanLumo-RC-$abi.apk"
+            "$APKSIGNER" verify --verbose "ScanLumo-RC-$abi.apk"
+            sha256sum "ScanLumo-RC-$abi.apk" > "ScanLumo-RC-$abi.apk.sha256"
           done
-          jarsigner -verify PDFMate-RC-test-signed.aab
-          sha256sum PDFMate-RC-test-signed.aab | tee PDFMate-RC-test-signed.aab.sha256
-          ls -lh PDFMate-RC-*.apk PDFMate-RC-test-signed.aab
+          jarsigner -verify ScanLumo-RC-test-signed.aab
+          sha256sum ScanLumo-RC-test-signed.aab | tee ScanLumo-RC-test-signed.aab.sha256
+          ls -lh ScanLumo-RC-*.apk ScanLumo-RC-test-signed.aab
 
       - name: Upload arm64-v8a APK only
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-APK-arm64-v8a
+          name: ScanLumo-APK-arm64-v8a
           path: |
-            PDFMate-RC-arm64-v8a.apk
-            PDFMate-RC-arm64-v8a.apk.sha256
+            ScanLumo-RC-arm64-v8a.apk
+            ScanLumo-RC-arm64-v8a.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload armeabi-v7a APK only
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-APK-armeabi-v7a
+          name: ScanLumo-APK-armeabi-v7a
           path: |
-            PDFMate-RC-armeabi-v7a.apk
-            PDFMate-RC-armeabi-v7a.apk.sha256
+            ScanLumo-RC-armeabi-v7a.apk
+            ScanLumo-RC-armeabi-v7a.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload x86_64 APK only
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-APK-x86_64
+          name: ScanLumo-APK-x86_64
           path: |
-            PDFMate-RC-x86_64.apk
-            PDFMate-RC-x86_64.apk.sha256
+            ScanLumo-RC-x86_64.apk
+            ScanLumo-RC-x86_64.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload test-signed AAB separately
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Test-Signed-AAB
+          name: ScanLumo-Test-Signed-AAB
           path: |
-            PDFMate-RC-test-signed.aab
-            PDFMate-RC-test-signed.aab.sha256
+            ScanLumo-RC-test-signed.aab
+            ScanLumo-RC-test-signed.aab.sha256
           if-no-files-found: error
           retention-days: 14
 
   android-integration-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [24, 29, 35]
 
     steps:
       - name: Checkout
@@ -307,7 +333,9 @@ jobs:
               s = s.replace(
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
-                  '    <uses-permission android:name="android.permission.CAMERA"/>'
+                  '    <uses-permission android:name="android.permission.CAMERA"/>\n'
+                  '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n'
+                  '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>'
               )
           marker = '<application'
           pos = s.find(marker)
@@ -349,7 +377,7 @@ jobs:
       - name: Android emulator app smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ matrix.api }}
           arch: x86_64
           target: google_apis
           profile: pixel_6
@@ -365,7 +393,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Android-test-diagnostics
+          name: ScanLumo-Android-test-diagnostics-API-${{ matrix.api }}
           path: device-logs/
           if-no-files-found: ignore
           retention-days: 7
@@ -388,7 +416,7 @@ jobs:
       - name: Download newly built release APK
         uses: actions/download-artifact@v4
         with:
-          name: PDFMate-APK-x86_64
+          name: ScanLumo-APK-x86_64
           path: installed-release
       - name: Launch new release APK twice
         uses: reactivecircus/android-emulator-runner@v2
@@ -399,10 +427,10 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: bash scripts/check_release_launch.sh installed-release/PDFMate-RC-x86_64.apk
+          script: bash scripts/check_release_launch.sh installed-release/ScanLumo-RC-x86_64.apk
       - name: Upload release startup diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PDFMate-Release-startup-diagnostics
+          name: ScanLumo-Release-startup-diagnostics
           path: release-launch-logs/
