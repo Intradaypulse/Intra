@@ -22,7 +22,7 @@ dependencies:
   firebase_core: ^4.15.0
   shared_preferences: ^2.5.3
   file_picker: ^13.1.0
-  file_saver: ^0.6.0
+  file_saver: ^0.7.0
   permission_handler: ^12.0.1
   pdf_manipulator: 5.0.1
   pdfx: ^2.11.0
